@@ -37,6 +37,7 @@ contract KlubCheckInRegistry {
         uint32 checkedIn;
         uint32 checkedOut;
         uint128 heldDeposits; // deposits not yet settled
+        uint128 organizerProceeds; // routed to the organizer, paid out after endTime
         uint256 totalWeight;
         bool settled;
         address kioskKey;
@@ -60,6 +61,7 @@ contract KlubCheckInRegistry {
     event CheckedIn(uint256 indexed eventId, address indexed guest, uint64 at, uint256 burned, uint8 method);
     event CheckedOut(uint256 indexed eventId, address indexed guest, uint64 at, uint256 weight);
     event Settled(uint256 indexed eventId, uint256 totalWeight, uint256 forfeited);
+    event ProceedsWithdrawn(uint256 indexed eventId, address indexed organizer, uint256 amount);
     event DepositWithdrawn(uint256 indexed eventId, address indexed guest, uint256 amount);
     event StaffUpdated(uint256 indexed eventId, address indexed staff, bool enabled);
     event KioskKeyUpdated(uint256 indexed eventId, address kioskKey);
@@ -374,10 +376,28 @@ contract KlubCheckInRegistry {
             } else if (e.policy.noShow == KlubTypes.Destination.RewardPool) {
                 IERC20(e.token).push(address(vault), forfeited);
                 vault.notifyTokenDeposit(eventId, forfeited);
+            } else if (e.policy.noShow == KlubTypes.Destination.Organizer) {
+                s.organizerProceeds += forfeited;
             }
             // Refund: nothing to move, guests withdraw from their own balance
         }
         emit Settled(eventId, s.totalWeight, forfeited);
+    }
+
+    /// @notice Deposits the organizer chose to keep are escrowed here and paid
+    /// out only after the event has ended, so a guest's money is never in the
+    /// organizer's hands while the event could still be cancelled.
+    function withdrawProceeds(uint256 eventId) external {
+        KlubTypes.EventConfig memory e = _config(eventId);
+        if (msg.sender != e.organizer) revert NotOrganizer();
+        if (block.timestamp < e.endTime) revert TooEarly();
+
+        EventState storage s = _state[eventId];
+        uint128 amount = s.organizerProceeds;
+        if (amount == 0) revert NothingToWithdraw();
+        s.organizerProceeds = 0;
+        IERC20(e.token).push(e.organizer, amount);
+        emit ProceedsWithdrawn(eventId, e.organizer, amount);
     }
 
     /// @notice Guests who never checked in take their refund from here when the
@@ -413,6 +433,8 @@ contract KlubCheckInRegistry {
             g.refundable += amount;
         } else if (dest == KlubTypes.Destination.Burn) {
             IERC20(e.token).push(BURN_ADDRESS, amount);
+        } else if (dest == KlubTypes.Destination.Organizer) {
+            s.organizerProceeds += amount;
         } else {
             IERC20(e.token).push(address(vault), amount);
             vault.notifyTokenDeposit(eventId, amount);
