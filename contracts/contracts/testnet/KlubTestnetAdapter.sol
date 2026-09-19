@@ -90,7 +90,7 @@ contract KlubTestnetAdapter is IKlubBuyAdapter {
         emit TestTokenCreated(token, creator, symbol);
     }
 
-    function buyExisting(address token, address recipient, uint256 minTokensOut)
+    function buyExisting(address token, address recipient, uint256 minTokensOut, bytes calldata)
         external
         payable
         returns (uint256 amountOut)

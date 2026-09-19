@@ -153,13 +153,13 @@ contract KlubCheckInTest is KlubBase {
         registry.setKioskKey(eventId, vm.addr(kioskPk));
 
         vm.warp(startTime + 1 minutes);
-        uint64 windowId = uint64(block.timestamp) / registry.KIOSK_WINDOW();
+        uint64 windowId = uint64(vm.getBlockTimestamp()) / registry.KIOSK_WINDOW();
         vm.prank(alice);
         registry.checkInWithKiosk(eventId, windowId, _kioskSig(eventId, true, windowId));
         assertEq(registry.checkedInCount(eventId), 1);
 
         vm.warp(startTime + 2 hours);
-        uint64 outWindow = uint64(block.timestamp) / registry.KIOSK_WINDOW();
+        uint64 outWindow = uint64(vm.getBlockTimestamp()) / registry.KIOSK_WINDOW();
         vm.prank(alice);
         registry.checkOutWithKiosk(eventId, outWindow, _kioskSig(eventId, false, outWindow));
         assertEq(registry.checkedOutCount(eventId), 1);
@@ -174,7 +174,7 @@ contract KlubCheckInTest is KlubBase {
         vm.stopPrank();
 
         vm.warp(startTime + 1 minutes);
-        uint64 windowId = uint64(block.timestamp) / registry.KIOSK_WINDOW();
+        uint64 windowId = uint64(vm.getBlockTimestamp()) / registry.KIOSK_WINDOW();
         vm.prank(alice);
         vm.expectRevert(KlubCheckInRegistry.BadSigner.selector);
         registry.checkInWithKiosk(eventId, windowId, _kioskSig(eventId, true, windowId));
@@ -187,7 +187,7 @@ contract KlubCheckInTest is KlubBase {
         registry.setKioskKey(eventId, vm.addr(kioskPk));
 
         vm.warp(startTime + 1 minutes);
-        uint64 windowId = uint64(block.timestamp) / registry.KIOSK_WINDOW();
+        uint64 windowId = uint64(vm.getBlockTimestamp()) / registry.KIOSK_WINDOW();
         bytes memory sig = _kioskSig(eventId, true, windowId);
 
         vm.warp(block.timestamp + 90); // three windows later

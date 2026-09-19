@@ -14,7 +14,7 @@ export const contracts = {
 export const factoryAbi = parseAbi([
   "struct RefundPolicy { uint8 remainder; uint8 cancelBefore; uint8 cancelAfter; uint8 rejected; uint8 noShow; uint64 refundCutoff; }",
   "struct EventConfig { address organizer; address token; bool tokenCreated; uint64 startTime; uint64 endTime; uint8 rewardMode; uint32 minCreditMinutes; uint8 methods; bool requireApproval; uint32 capacity; uint128 minHolding; uint128 burnAmount; string metadataCID; RefundPolicy policy; }",
-  "struct CreateEventParams { address token; string name; string symbol; string metadataCID; uint64 startTime; uint64 endTime; uint8 rewardMode; uint32 minCreditMinutes; uint8 methods; bool requireApproval; uint32 capacity; uint128 minHolding; uint128 burnAmount; RefundPolicy policy; uint256 minTokensOut; }",
+  "struct CreateEventParams { address token; string name; string symbol; string metadataCID; uint64 startTime; uint64 endTime; uint8 rewardMode; uint32 minCreditMinutes; uint8 methods; bool requireApproval; uint32 capacity; uint128 minHolding; uint128 burnAmount; RefundPolicy policy; uint256 minTokensOut; bytes routeData; }",
   "function eventCount() view returns (uint256)",
   "function minInitialBuy() view returns (uint256)",
   "function getEvent(uint256 eventId) view returns (EventConfig)",

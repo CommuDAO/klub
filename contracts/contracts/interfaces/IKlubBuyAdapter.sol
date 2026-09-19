@@ -15,7 +15,9 @@ interface IKlubBuyAdapter {
         uint256 minTokensOut
     ) external payable returns (address token, uint256 amountOut);
 
-    function buyExisting(address token, address recipient, uint256 minTokensOut)
+    /// @param routeData empty for a token still on the bonding curve; for a
+    /// graduated token it is the swap route the app computed, opaque to KLUB.
+    function buyExisting(address token, address recipient, uint256 minTokensOut, bytes calldata routeData)
         external
         payable
         returns (uint256 amountOut);

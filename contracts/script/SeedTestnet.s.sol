@@ -43,7 +43,8 @@ contract SeedTestnet is Script {
             minHolding: 500e18,
             burnAmount: 200e18,
             policy: policy,
-            minTokensOut: 0
+            minTokensOut: 0,
+            routeData: ""
         });
 
         vm.startBroadcast(pk);

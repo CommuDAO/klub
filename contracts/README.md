@@ -91,3 +91,25 @@ FACTORY=0x... VAULT=0x... forge script script/SeedTestnet.s.sol --rpc-url kub_te
 `Deploy.s.sol` deploys `KlubTestnetAdapter` automatically on testnet. On
 mainnet it refuses to run without `ADAPTER`, the address of the adapter that
 talks to PumpCoreNative and the Junoswap router.
+
+## Mainnet adapter
+
+`contracts/mainnet/KlubJunoswapAdapter.sol` talks to the live Junoswap
+deployments on chain 96, taken from `@coshi190/juno-moneta-sdk`:
+
+- bonding curve (launchpad): `0x65F6EC30A9E70822721585f6Bba15c40c2F8ab4e`
+- aggregator router: `0x869A40921A332e0D79300F91361A3DC77F2a0ebc`
+
+It reads `createFee()` and splits the organizer's value into the create fee and
+the initial buy, receives the tokens the launchpad sends back and forwards the
+exact amount, and re-checks the delivered amount against KLUB's own
+`minTokensOut`.
+
+Tokens that already graduated are bought through the router's `aggregate`, so
+`createEvent` carries a `routeData` field: empty while the token is still on the
+curve, otherwise the ABI-encoded `Leg[]` route the app computed. The adapter
+rejects a route for a curve token and refuses a graduated token without one.
+
+```
+PRIVATE_KEY=0x… forge script script/DeployMainnet.s.sol --rpc-url kub_mainnet --broadcast
+```

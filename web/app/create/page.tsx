@@ -73,7 +73,8 @@ export default function CreatePage() {
               noShow: Number(form.noShow),
               refundCutoff: form.cutoff ? toUnix(form.cutoff) : toUnix(form.start)
             },
-            minTokensOut: 0n
+            minTokensOut: 0n,
+            routeData: "0x" as `0x${string}`
           }
         ]
       });

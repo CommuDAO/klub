@@ -113,7 +113,8 @@ abstract contract KlubBase is Test {
                 KlubTypes.Destination.Refund,
                 KlubTypes.Destination.Burn
             ),
-            minTokensOut: 0
+            minTokensOut: 0,
+            routeData: ""
         });
     }
 

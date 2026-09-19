@@ -128,7 +128,7 @@ contract KlubEventFactory {
             );
         } else {
             token = p.token;
-            tokensOut = buyAdapter.buyExisting{value: msg.value}(token, msg.sender, p.minTokensOut);
+            tokensOut = buyAdapter.buyExisting{value: msg.value}(token, msg.sender, p.minTokensOut, p.routeData);
         }
         if (token == address(0)) revert TokenNotDelivered();
         if (tokensOut < p.minTokensOut) revert TokenNotDelivered();

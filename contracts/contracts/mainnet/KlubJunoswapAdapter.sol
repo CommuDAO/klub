@@ -2,45 +2,84 @@
 pragma solidity 0.8.24;
 
 import {IKlubBuyAdapter} from "../interfaces/IKlubBuyAdapter.sol";
-import {IERC20} from "../libraries/KlubERC20.sol";
+import {IERC20, KlubERC20} from "../libraries/KlubERC20.sol";
 
-/// @dev Replace these two interfaces with the real PumpCoreNative and Junoswap
-/// router signatures before deploying. Nothing else in KLUB changes.
-interface IPumpCoreNative {
-    function createToken(string calldata name, string calldata symbol, string calldata metadata)
-        external
-        payable
-        returns (address token);
+/// @notice Junoswap bonding-curve launchpad (bc-juno-v1).
+interface IJunoBondingCurve {
+    function createFee() external view returns (uint256);
 
-    function buy(address token, uint256 minTokensOut, address to) external payable returns (uint256 amountOut);
+    function createToken(
+        string calldata name,
+        string calldata symbol,
+        string calldata logo,
+        string calldata description,
+        string calldata link1,
+        string calldata link2,
+        string calldata link3
+    ) external payable returns (address token);
 
-    function graduated(address token) external view returns (bool);
+    /// @dev Tokens are delivered to msg.sender.
+    function buy(address tokenAddr, uint256 minToken) external payable returns (uint256 amountOut);
+
+    function pumpReserve(address token) external view returns (uint256 nativeReserve, uint256 tokenReserve);
 }
 
-interface IJunoswapRouter {
-    function swapExactNativeForTokens(address token, uint256 minTokensOut, address to, uint256 deadline)
+/// @notice Junoswap aggregator router, used once a token has graduated.
+interface IJunoAggRouter {
+    struct AggregateParams {
+        address tokenIn;
+        address tokenOut;
+        uint256 amountIn;
+        uint256 minAmountOut;
+        address recipient;
+        uint256 deadline;
+        bool unwrapOut;
+        address referrer;
+    }
+
+    struct Hop {
+        address factory;
+        bytes swapData;
+    }
+
+    struct Leg {
+        uint256 amountIn;
+        Hop[] hops;
+    }
+
+    function aggregate(AggregateParams calldata p, Leg[] calldata legs)
         external
         payable
         returns (uint256 amountOut);
 }
 
 /// @title KlubJunoswapAdapter
-/// @notice The only KLUB contract that knows the Junoswap launchpad and router.
-/// It re-checks the delivered amount against KLUB's own minTokensOut, so a
-/// missing slippage guard on the router cannot hurt an organizer.
+/// @notice The only KLUB contract that knows Junoswap. It splits the create fee
+/// from the organizer initial buy, forwards the tokens the launchpad sends back
+/// to this contract, and always re-checks the delivered amount against KLUB's
+/// own minTokensOut, so a missing slippage guard on the router cannot hurt an
+/// organizer.
 contract KlubJunoswapAdapter is IKlubBuyAdapter {
-    IPumpCoreNative public immutable launchpad;
-    IJunoswapRouter public immutable router;
+    using KlubERC20 for IERC20;
+
+    IJunoBondingCurve public immutable launchpad;
+    IJunoAggRouter public immutable router;
 
     error NoValue();
-    error SlippageTooHigh(uint256 amountOut, uint256 minTokensOut);
+    error ValueBelowCreateFee(uint256 sent, uint256 createFee);
     error TokenNotDelivered();
+    error SlippageTooHigh(uint256 amountOut, uint256 minTokensOut);
+    error RouteRequired();
+    error RouteNotAllowedOnCurve();
 
-    constructor(IPumpCoreNative launchpad_, IJunoswapRouter router_) {
+    constructor(IJunoBondingCurve launchpad_, IJunoAggRouter router_) {
         launchpad = launchpad_;
         router = router_;
     }
 
+    /// @notice Deploys a token on the bonding curve and spends the rest of the
+    /// value buying it for the organizer. metadataCID is stored as the token
+    /// logo field, which is where the launchpad keeps its off-chain metadata.
     function createTokenAndBuy(
         string calldata name,
         string calldata symbol,
@@ -49,31 +88,65 @@ contract KlubJunoswapAdapter is IKlubBuyAdapter {
         address recipient,
         uint256 minTokensOut
     ) external payable returns (address token, uint256 amountOut) {
-        if (msg.value == 0) revert NoValue();
-        token = launchpad.createToken(name, symbol, metadataCID);
+        uint256 fee = launchpad.createFee();
+        if (msg.value <= fee) revert ValueBelowCreateFee(msg.value, fee);
+
+        token = launchpad.createToken{value: fee}(name, symbol, metadataCID, "", "", "", "");
         if (token == address(0)) revert TokenNotDelivered();
 
-        uint256 before = IERC20(token).balanceOf(recipient);
-        launchpad.buy{value: msg.value}(token, minTokensOut, recipient);
-        amountOut = IERC20(token).balanceOf(recipient) - before;
-        if (amountOut < minTokensOut) revert SlippageTooHigh(amountOut, minTokensOut);
+        amountOut = _buyOnCurve(token, msg.value - fee, minTokensOut, recipient);
     }
 
-    function buyExisting(address token, address recipient, uint256 minTokensOut)
+    /// @notice Buys a token that already exists. routeData is empty while the
+    /// token is still on the curve; once it has graduated the app passes the
+    /// encoded router legs.
+    function buyExisting(address token, address recipient, uint256 minTokensOut, bytes calldata routeData)
         external
         payable
         returns (uint256 amountOut)
     {
         if (msg.value == 0) revert NoValue();
-        uint256 before = IERC20(token).balanceOf(recipient);
 
-        if (launchpad.graduated(token)) {
-            router.swapExactNativeForTokens{value: msg.value}(token, minTokensOut, recipient, block.timestamp);
-        } else {
-            launchpad.buy{value: msg.value}(token, minTokensOut, recipient);
+        (, uint256 tokenReserve) = launchpad.pumpReserve(token);
+        bool onCurve = tokenReserve > 0;
+
+        if (onCurve) {
+            if (routeData.length != 0) revert RouteNotAllowedOnCurve();
+            return _buyOnCurve(token, msg.value, minTokensOut, recipient);
         }
 
+        if (routeData.length == 0) revert RouteRequired();
+        IJunoAggRouter.Leg[] memory legs = abi.decode(routeData, (IJunoAggRouter.Leg[]));
+
+        uint256 before = IERC20(token).balanceOf(recipient);
+        router.aggregate{value: msg.value}(
+            IJunoAggRouter.AggregateParams({
+                tokenIn: address(0),
+                tokenOut: token,
+                amountIn: msg.value,
+                minAmountOut: minTokensOut,
+                recipient: recipient,
+                deadline: block.timestamp,
+                unwrapOut: false,
+                referrer: address(0)
+            }),
+            legs
+        );
         amountOut = IERC20(token).balanceOf(recipient) - before;
         if (amountOut < minTokensOut) revert SlippageTooHigh(amountOut, minTokensOut);
+    }
+
+    /// @dev The launchpad sends bought tokens to msg.sender, so this contract
+    /// receives them and forwards the exact amount to the organizer.
+    function _buyOnCurve(address token, uint256 value, uint256 minTokensOut, address recipient)
+        private
+        returns (uint256 amountOut)
+    {
+        IERC20 erc20 = IERC20(token);
+        uint256 before = erc20.balanceOf(address(this));
+        launchpad.buy{value: value}(token, minTokensOut);
+        amountOut = erc20.balanceOf(address(this)) - before;
+        if (amountOut < minTokensOut || amountOut == 0) revert SlippageTooHigh(amountOut, minTokensOut);
+        erc20.pushExact(recipient, amountOut);
     }
 }

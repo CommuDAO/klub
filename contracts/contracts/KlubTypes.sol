@@ -77,5 +77,6 @@ library KlubTypes {
         uint128 burnAmount;
         RefundPolicy policy;
         uint256 minTokensOut; // slippage guard for the organizer initial buy
+        bytes routeData; // swap route for a graduated token; empty otherwise
     }
 }
