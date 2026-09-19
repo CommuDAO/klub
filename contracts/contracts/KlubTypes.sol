@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-/// @notice Shared enums and structs for the KLUB event system.
+/// @title KlubTypes
+/// @notice Shared enums and structs. Kept in one place so the factory, the
+/// registry and the vault agree on the shape of an event.
 library KlubTypes {
-    /// @notice How the check-in reward pool is split.
+    /// @notice How the check-in reward pool is split between guests.
     enum RewardMode {
         ByTime, // weight = max(time at event, minCredit)
         Equal // weight = 1 per checked-in guest
@@ -13,23 +15,19 @@ library KlubTypes {
     enum Destination {
         Refund, // guest can withdraw it
         Burn, // sent to the burn address
-        RewardPool // added to the event check-in reward pool
+        RewardPool, // added to the event check-in reward pool
+        Organizer // escrowed for the organizer, claimable after the event ends
     }
 
     /// @notice Lifecycle of one guest for one event.
     enum GuestStatus {
         None,
-        Pending, // waiting for organizer approval
-        Approved, // may check in
-        Waitlisted, // queued, deposit already taken
-        Rejected, // organizer said no
-        Cancelled // guest cancelled the RSVP
+        Pending,
+        Approved,
+        Waitlisted,
+        Rejected,
+        Cancelled
     }
-
-    /// @dev Bit flags for enabled check-in methods.
-    uint8 internal constant METHOD_STAFF = 1;
-    uint8 internal constant METHOD_KIOSK = 2;
-    uint8 internal constant METHOD_CODE = 4;
 
     /// @notice Destination of a deposit in each situation. Locked at creation.
     struct RefundPolicy {
@@ -38,11 +36,10 @@ library KlubTypes {
         Destination cancelAfter; // guest cancels after refundCutoff
         Destination rejected; // organizer rejects, or approval never comes
         Destination noShow; // RSVP but never checked in
-        uint64 refundCutoff; // timestamp splitting cancelBefore / cancelAfter
+        uint64 refundCutoff; // the line between cancelBefore and cancelAfter
     }
 
-    /// @notice Everything about one event. Only minCredit can change, and only
-    /// before the first check-in.
+    /// @notice Everything about an event that the other contracts read.
     struct EventConfig {
         address organizer;
         address token;
@@ -51,18 +48,19 @@ library KlubTypes {
         uint64 endTime;
         RewardMode rewardMode;
         uint32 minCreditMinutes;
-        uint8 methods; // bit flags above
+        uint8 methods; // bit flags: STAFF | KIOSK | CODE
         bool requireApproval;
         uint32 capacity; // 0 = unlimited
         uint128 minHolding; // deposited at RSVP
-        uint128 burnAmount; // burned at check-in, <= minHolding
-        string metadataCID; // IPFS CID: cover, description, venue, chat link
+        uint128 burnAmount; // burned from the deposit at check-in
+        string metadataCID; // cover, description, venue, chat link
         RefundPolicy policy;
     }
 
-    /// @notice Arguments of createEvent, kept in a struct to stay readable.
+    /// @notice Arguments of createEvent, kept as a struct to stay under the
+    /// stack limit and to keep the call site readable.
     struct CreateEventParams {
-        address token; // address(0) = deploy a new token
+        address token; // 0 = deploy a new token on the curve
         string name;
         string symbol;
         string metadataCID;
@@ -79,4 +77,8 @@ library KlubTypes {
         uint256 minTokensOut; // slippage guard for the organizer initial buy
         bytes routeData; // swap route for a graduated token; empty otherwise
     }
+
+    uint8 internal constant METHOD_STAFF = 1;
+    uint8 internal constant METHOD_KIOSK = 2;
+    uint8 internal constant METHOD_CODE = 4;
 }
