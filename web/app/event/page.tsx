@@ -171,16 +171,21 @@ function EventInner() {
             </div>
           </div>
 
-          {meta.address ? (
+          {meta.venue || meta.mapUrl ? (
             <div className="col gap8">
               <strong>Location</strong>
-              <span className="small muted">{meta.address}</span>
+              {meta.venue ? <span className="small muted">{meta.venue}</span> : null}
               {process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY && meta.lat && meta.lng ? (
                 <iframe
                   title="map"
                   style={{ border: 0, width: "100%", height: 160, borderRadius: 14 }}
                   src={`https://www.google.com/maps/embed/v1/place?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY}&q=${meta.lat},${meta.lng}`}
                 />
+              ) : null}
+              {meta.mapUrl ? (
+                <a className="btn ghost wide" href={meta.mapUrl} target="_blank" rel="noreferrer">
+                  Open in Google Maps
+                </a>
               ) : null}
             </div>
           ) : null}
