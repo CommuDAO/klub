@@ -5,6 +5,8 @@ import { parseEther, parseUnits } from "viem";
 import { useReadContract, useWriteContract } from "wagmi";
 import { BackBar } from "@/components/Chrome";
 import { contracts, factoryAbi, DESTINATION, METHOD } from "@/lib/contracts";
+import { coordsFromMapUrl, EventMetadata, ipfsUrl } from "@/lib/ipfs";
+import { pinataReady, uploadCover } from "@/lib/pinata";
 
 const toUnix = (value: string) => BigInt(Math.floor(new Date(value).getTime() / 1000));
 
@@ -19,8 +21,11 @@ export default function CreatePage() {
   const [form, setForm] = useState({
     name: "",
     symbol: "",
-    metadataCID: "",
     token: "",
+    description: "",
+    venue: "",
+    mapUrl: "",
+    telegram: "",
     start: "",
     end: "",
     rewardMode: 0,
@@ -36,11 +41,41 @@ export default function CreatePage() {
     rejected: 0,
     noShow: 1,
     cutoff: "",
-    initialBuy: "10"
+    initialBuy: "0.2"
   });
+  const [coverCID, setCoverCID] = useState("");
+  const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<string>();
 
   const set = (key: keyof typeof form, value: unknown) => setForm((f) => ({ ...f, [key]: value }));
+
+  async function onCoverPicked(file?: File) {
+    if (!file) return;
+    setStatus(undefined);
+    setUploading(true);
+    try {
+      setCoverCID(await uploadCover(file));
+    } catch (e) {
+      setStatus((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function buildMetadata(): string {
+    const { lat, lng } = coordsFromMapUrl(form.mapUrl);
+    const meta: EventMetadata = {
+      title: form.name,
+      description: form.description || undefined,
+      coverCID: coverCID || undefined,
+      venue: form.venue || undefined,
+      mapUrl: form.mapUrl || undefined,
+      lat,
+      lng,
+      telegram: form.telegram || undefined
+    };
+    return JSON.stringify(meta);
+  }
 
   async function submit() {
     setStatus(undefined);
@@ -55,7 +90,7 @@ export default function CreatePage() {
             token: (form.token || "0x0000000000000000000000000000000000000000") as `0x${string}`,
             name: form.name,
             symbol: form.symbol,
-            metadataCID: form.metadataCID,
+            metadataCID: buildMetadata(),
             startTime: toUnix(form.start),
             endTime: toUnix(form.end),
             rewardMode: Number(form.rewardMode),
@@ -96,22 +131,72 @@ export default function CreatePage() {
     <div className="shell">
       <BackBar title="Create event" />
       <main className="pad col gap16">
-        <div className="col gap8">
-          <span className="label">Event name</span>
-          <input className="field" value={form.name} onChange={(e) => set("name", e.target.value)} />
-          <span className="label">Token symbol</span>
-          <input className="field" value={form.symbol} onChange={(e) => set("symbol", e.target.value)} />
-          <span className="label">Existing token address (leave empty to create a new one)</span>
-          <input className="field" value={form.token} onChange={(e) => set("token", e.target.value)} placeholder="0x…" />
-          <span className="label">Metadata CID (cover, description, venue, Telegram link)</span>
-          <input className="field" value={form.metadataCID} onChange={(e) => set("metadataCID", e.target.value)} />
+        <div className="card col gap12">
+          <strong>About the event</strong>
+
+          <label className="col gap8">
+            <span className="label">Event name</span>
+            <input className="field" value={form.name} onChange={(e) => set("name", e.target.value)} />
+          </label>
+
+          <label className="col gap8">
+            <span className="label">Token symbol</span>
+            <input className="field" value={form.symbol} onChange={(e) => set("symbol", e.target.value)} placeholder="KNIGHT" />
+          </label>
+
+          <div className="col gap8">
+            <span className="label">Cover image</span>
+            <span className="tiny muted">Square, 1200 × 1200 px works best. JPG or PNG, up to 5 MB.</span>
+            {coverCID ? <img className="cover" src={ipfsUrl(coverCID)} alt="Cover preview" /> : null}
+            <input
+              className="field"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={!pinataReady || uploading}
+              onChange={(e) => onCoverPicked(e.target.files?.[0])}
+              style={{ paddingTop: 11 }}
+            />
+            {uploading ? <span className="tiny muted">Uploading to IPFS…</span> : null}
+            {!pinataReady ? <span className="tiny muted">Image upload is not configured on this deployment.</span> : null}
+            {coverCID ? <span className="tiny muted">Pinned: {coverCID}</span> : null}
+          </div>
+
+          <label className="col gap8">
+            <span className="label">Description</span>
+            <textarea
+              className="field area"
+              value={form.description}
+              onChange={(e) => set("description", e.target.value)}
+              placeholder="What happens at this event, who it is for, what to bring."
+            />
+          </label>
         </div>
 
-        <div className="grid2">
+        <div className="card col gap12">
+          <strong>Where and when</strong>
+
+          <label className="col gap8">
+            <span className="label">Venue name</span>
+            <input className="field" value={form.venue} onChange={(e) => set("venue", e.target.value)} placeholder="Foundry, Sukhumvit 49" />
+          </label>
+
+          <label className="col gap8">
+            <span className="label">Google Maps link</span>
+            <input className="field" value={form.mapUrl} onChange={(e) => set("mapUrl", e.target.value)} placeholder="https://maps.app.goo.gl/…" />
+            <span className="tiny muted">Paste the share link. Coordinates are read from it for the map and weather.</span>
+          </label>
+
+          <label className="col gap8">
+            <span className="label">Telegram group link</span>
+            <input className="field" value={form.telegram} onChange={(e) => set("telegram", e.target.value)} placeholder="https://t.me/…" />
+            <span className="tiny muted">Shown to guests once they have RSVP'd.</span>
+          </label>
+
           <label className="col gap8">
             <span className="label">Starts</span>
             <input className="field" type="datetime-local" value={form.start} onChange={(e) => set("start", e.target.value)} />
           </label>
+
           <label className="col gap8">
             <span className="label">Ends</span>
             <input className="field" type="datetime-local" value={form.end} onChange={(e) => set("end", e.target.value)} />
@@ -136,7 +221,7 @@ export default function CreatePage() {
             <span className="small">Require approval</span>
             <input type="checkbox" checked={form.requireApproval} onChange={(e) => set("requireApproval", e.target.checked)} />
           </label>
-          <div className="row gap8">
+          <div className="row gap8" style={{ flexWrap: "wrap" }}>
             {[
               ["Staff scan", METHOD.STAFF],
               ["Kiosk QR", METHOD.KIOSK],
@@ -190,19 +275,24 @@ export default function CreatePage() {
         </div>
 
         <div className="card col gap12">
-          <div className="between">
-            <div className="col">
-              <strong>Initial buy</strong>
-              <span className="tiny muted">
-                Required, minimum {minInitialBuy ? Number(minInitialBuy) / 1e18 : 10} KUB
-              </span>
-            </div>
-            <input className="field" style={{ width: 120 }} value={form.initialBuy} onChange={(e) => set("initialBuy", e.target.value)} />
-          </div>
-          <button className="btn accent wide" disabled={isPending} onClick={submit}>
+          <label className="col gap8">
+            <span className="label">Initial buy (KUB)</span>
+            <input className="field" value={form.initialBuy} onChange={(e) => set("initialBuy", e.target.value)} />
+            <span className="tiny muted">
+              Minimum {minInitialBuy ? Number(minInitialBuy) / 1e18 : 0.1} KUB. The launchpad keeps 0.1 KUB as the token
+              creation fee, so send more than that or the transaction reverts.
+            </span>
+          </label>
+
+          <label className="col gap8">
+            <span className="label">Existing token address (optional)</span>
+            <input className="field" value={form.token} onChange={(e) => set("token", e.target.value)} placeholder="0x… — leave empty to create a new token" />
+          </label>
+
+          <button className="btn accent wide" disabled={isPending || uploading} onClick={submit}>
             {isPending ? "Confirm in wallet…" : "Create event and buy"}
           </button>
-          {status ? <span className="tiny muted">{status}</span> : null}
+          {status ? <span className="tiny muted" style={{ wordBreak: "break-all" }}>{status}</span> : null}
         </div>
       </main>
     </div>
