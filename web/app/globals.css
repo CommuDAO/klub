@@ -62,3 +62,6 @@ input, textarea, select { font: inherit; }
 .nav a.on { background: #efeae3; color: var(--ink); }
 .notice { padding: 12px 14px; border-radius: 12px; background: #f6e3de; color: #8c2d16; font-size: 13px; }
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.grid2 > * { min-width: 0; }
+input[type="datetime-local"], input[type="date"], input[type="file"] { max-width: 100%; }
+.field { max-width: 100%; }
