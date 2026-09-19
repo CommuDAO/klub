@@ -2,11 +2,11 @@
 pragma solidity 0.8.24;
 
 import {Test} from "forge-std/Test.sol";
-import {KlubJunoswapAdapter, IJunoBondingCurve, IJunoAggRouter} from "../contracts/mainnet/KlubJunoswapAdapter.sol";
+import {KlubDexAdapter, IBondingCurve, IAggRouter} from "../contracts/mainnet/KlubDexAdapter.sol";
 import {KlubTestToken} from "../contracts/testnet/KlubTestnetAdapter.sol";
 
-/// @dev Stand-in for the Junoswap bonding curve, matching the real ABI.
-contract MockCurve is IJunoBondingCurve {
+/// @dev Stand-in for the the DEX bonding curve, matching the real ABI.
+contract MockCurve is IBondingCurve {
     uint256 public constant TOKENS_PER_NATIVE = 1000;
     uint256 public createFeeValue = 1 ether;
     mapping(address => uint256) public tokenReserveOf;
@@ -49,7 +49,7 @@ contract MockCurve is IJunoBondingCurve {
     }
 }
 
-contract MockRouter is IJunoAggRouter {
+contract MockRouter is IAggRouter {
     uint256 public constant TOKENS_PER_NATIVE = 500;
     MockCurve public immutable curve;
 
@@ -68,13 +68,13 @@ contract MockRouter is IJunoAggRouter {
 contract KlubAdapterTest is Test {
     MockCurve internal curve;
     MockRouter internal router;
-    KlubJunoswapAdapter internal adapter;
+    KlubDexAdapter internal adapter;
     address internal organizer = address(0x0B9A);
 
     function setUp() public {
         curve = new MockCurve();
         router = new MockRouter(curve);
-        adapter = new KlubJunoswapAdapter(IJunoBondingCurve(address(curve)), IJunoAggRouter(address(router)));
+        adapter = new KlubDexAdapter(IBondingCurve(address(curve)), IAggRouter(address(router)));
         vm.deal(organizer, 100 ether);
     }
 
@@ -93,14 +93,14 @@ contract KlubAdapterTest is Test {
 
     function test_createRevertsWhenValueOnlyCoversTheFee() public {
         vm.prank(organizer);
-        vm.expectRevert(abi.encodeWithSelector(KlubJunoswapAdapter.ValueBelowCreateFee.selector, 1 ether, 1 ether));
+        vm.expectRevert(abi.encodeWithSelector(KlubDexAdapter.ValueBelowCreateFee.selector, 1 ether, 1 ether));
         adapter.createTokenAndBuy{value: 1 ether}("N", "S", "cid", organizer, organizer, 0);
     }
 
     function test_buyExistingOnCurveRejectsRouteData() public {
         (address token,) = _create();
         vm.prank(organizer);
-        vm.expectRevert(KlubJunoswapAdapter.RouteNotAllowedOnCurve.selector);
+        vm.expectRevert(KlubDexAdapter.RouteNotAllowedOnCurve.selector);
         adapter.buyExisting{value: 1 ether}(token, organizer, 0, hex"1234");
     }
 
@@ -117,7 +117,7 @@ contract KlubAdapterTest is Test {
         (address token,) = _create();
         curve.setGraduated(token);
         vm.prank(organizer);
-        vm.expectRevert(KlubJunoswapAdapter.RouteRequired.selector);
+        vm.expectRevert(KlubDexAdapter.RouteRequired.selector);
         adapter.buyExisting{value: 1 ether}(token, organizer, 0, "");
     }
 
@@ -125,10 +125,10 @@ contract KlubAdapterTest is Test {
         (address token,) = _create();
         curve.setGraduated(token);
 
-        IJunoAggRouter.Hop[] memory hops = new IJunoAggRouter.Hop[](1);
-        hops[0] = IJunoAggRouter.Hop({factory: address(0xF00), swapData: hex"beef"});
-        IJunoAggRouter.Leg[] memory legs = new IJunoAggRouter.Leg[](1);
-        legs[0] = IJunoAggRouter.Leg({amountIn: 1 ether, hops: hops});
+        IAggRouter.Hop[] memory hops = new IAggRouter.Hop[](1);
+        hops[0] = IAggRouter.Hop({factory: address(0xF00), swapData: hex"beef"});
+        IAggRouter.Leg[] memory legs = new IAggRouter.Leg[](1);
+        legs[0] = IAggRouter.Leg({amountIn: 1 ether, hops: hops});
 
         uint256 before = KlubTestToken(token).balanceOf(organizer);
         vm.prank(organizer);

@@ -17,7 +17,7 @@ import {IKlubBuyAdapter} from "../contracts/interfaces/IKlubBuyAdapter.sol";
 
 /// @notice Deploys the whole KLUB system and wires it together.
 /// Testnet (chain 25925) deploys KlubTestnetAdapter unless ADAPTER is set.
-/// Mainnet (chain 96) requires ADAPTER, the adapter that talks to Junoswap.
+/// Mainnet (chain 96) requires ADAPTER, the adapter that talks to the DEX.
 ///
 ///   forge script script/Deploy.s.sol --rpc-url kub_testnet --broadcast
 contract Deploy is Script {

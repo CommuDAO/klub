@@ -4,7 +4,7 @@ pragma solidity 0.8.24;
 import {IKlubBuyAdapter} from "../interfaces/IKlubBuyAdapter.sol";
 
 /// @notice Very small ERC20 used only on testnet, standing in for a token that
-/// the Junoswap launchpad would deploy on mainnet.
+/// the the DEX launchpad would deploy on mainnet.
 contract KlubTestToken {
     string public name;
     string public symbol;
@@ -58,7 +58,7 @@ contract KlubTestToken {
     }
 }
 
-/// @notice Testnet stand-in for the Junoswap launchpad and router. It mints a
+/// @notice Testnet stand-in for the the launchpad and router. It mints a
 /// fixed number of tokens per tKUB instead of running a bonding curve, so the
 /// whole KLUB flow can be tested before the real adapter exists on mainnet.
 contract KlubTestnetAdapter is IKlubBuyAdapter {

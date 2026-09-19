@@ -2,7 +2,7 @@
 pragma solidity 0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
-import {KlubJunoswapAdapter, IJunoBondingCurve, IJunoAggRouter} from "../contracts/mainnet/KlubJunoswapAdapter.sol";
+import {KlubDexAdapter, IBondingCurve, IAggRouter} from "../contracts/mainnet/KlubDexAdapter.sol";
 import {KlubEventFactory} from "../contracts/KlubEventFactory.sol";
 import {KlubCheckInRegistry} from "../contracts/KlubCheckInRegistry.sol";
 import {KlubRewardVault} from "../contracts/KlubRewardVault.sol";
@@ -19,7 +19,7 @@ import {IKlubBuyAdapter} from "../contracts/interfaces/IKlubBuyAdapter.sol";
 ///
 ///   PRIVATE_KEY=0x… forge script script/DeployMainnet.s.sol --rpc-url kub_mainnet --broadcast
 contract DeployMainnet is Script {
-    // Junoswap deployments on chain 96, from @coshi190/juno-moneta-sdk
+    // the launchpad deployments on chain 96, from the DEX SDK
     address constant BONDING_CURVE = 0x65F6EC30A9E70822721585f6Bba15c40c2F8ab4e;
     address constant AGG_ROUTER = 0x869A40921A332e0D79300F91361A3DC77F2a0ebc;
 
@@ -33,8 +33,8 @@ contract DeployMainnet is Script {
 
         vm.startBroadcast(pk);
 
-        KlubJunoswapAdapter adapter =
-            new KlubJunoswapAdapter(IJunoBondingCurve(curve), IJunoAggRouter(router));
+        KlubDexAdapter adapter =
+            new KlubDexAdapter(IBondingCurve(curve), IAggRouter(router));
         KlubEventFactory factory = new KlubEventFactory(admin, minInitialBuy);
         KlubCheckInRegistry registry = new KlubCheckInRegistry(IKlubEventFactory(address(factory)), admin);
         KlubRewardVault vault =

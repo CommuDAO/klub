@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-/// @notice Thin boundary between KLUB and the Junoswap launchpad / router.
+/// @notice Thin boundary between KLUB and the launchpad and router.
 /// Deployed separately once that ABI is fixed, so KLUB never depends on that
 /// codebase directly. KLUB always passes its own minTokensOut and never relies
 /// on router level slippage checks.

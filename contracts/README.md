@@ -1,6 +1,6 @@
 # KLUB contracts
 
-Event check-in on KUB Chain, wired to Junoswap. Everything the app needs lives
+Event check-in on KUB Chain, wired to the KUB Chain launchpad and DEX. Everything the app needs lives
 on chain; the web app is a static site that reads these contracts over RPC.
 
 Solidity 0.8.24, optimizer on (200 runs). No external dependencies.
@@ -15,7 +15,7 @@ Solidity 0.8.24, optimizer on (200 runs). No external dependencies.
 | `KlubRewardVault.sol` | Holds KUB and event-token rewards, finalize, claim, quest claim, leftover |
 | `KlubQuestRegistry.sol` | Five quest kinds, referral tracking, booth and social approval |
 | `KlubProfileRegistry.sol` | Display name, avatar, Telegram handle, following organizers |
-| `interfaces/IKlubBuyAdapter.sol` | Boundary to the Junoswap launchpad and router |
+| `interfaces/IKlubBuyAdapter.sol` | Boundary to the launchpad and router |
 | `testnet/KlubTestnetAdapter.sol` | Testnet stand-in for that adapter, with a faucet |
 
 ## Testnet first
@@ -28,7 +28,7 @@ On testnet, deploy `KlubTestnetAdapter` in place of the real adapter. It mints
 1000 test tokens per tKUB instead of running a bonding curve, so RSVP, deposit,
 burn, check-out, rewards and quests can all be exercised end to end. Nothing
 else changes when moving to mainnet: only the adapter address is swapped for the
-one that talks to PumpCoreNative and the Junoswap router.
+one that talks to the launchpad and the router.
 
 ## Deploy order
 
@@ -90,26 +90,4 @@ FACTORY=0x... VAULT=0x... forge script script/SeedTestnet.s.sol --rpc-url kub_te
 
 `Deploy.s.sol` deploys `KlubTestnetAdapter` automatically on testnet. On
 mainnet it refuses to run without `ADAPTER`, the address of the adapter that
-talks to PumpCoreNative and the Junoswap router.
-
-## Mainnet adapter
-
-`contracts/mainnet/KlubJunoswapAdapter.sol` talks to the live Junoswap
-deployments on chain 96, taken from `@coshi190/juno-moneta-sdk`:
-
-- bonding curve (launchpad): `0x65F6EC30A9E70822721585f6Bba15c40c2F8ab4e`
-- aggregator router: `0x869A40921A332e0D79300F91361A3DC77F2a0ebc`
-
-It reads `createFee()` and splits the organizer's value into the create fee and
-the initial buy, receives the tokens the launchpad sends back and forwards the
-exact amount, and re-checks the delivered amount against KLUB's own
-`minTokensOut`.
-
-Tokens that already graduated are bought through the router's `aggregate`, so
-`createEvent` carries a `routeData` field: empty while the token is still on the
-curve, otherwise the ABI-encoded `Leg[]` route the app computed. The adapter
-rejects a route for a curve token and refuses a graduated token without one.
-
-```
-PRIVATE_KEY=0x… forge script script/DeployMainnet.s.sol --rpc-url kub_mainnet --broadcast
-```
+talks to the launchpad and the router.

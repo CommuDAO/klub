@@ -7,7 +7,7 @@ import {IKlubCheckInRegistry} from "./interfaces/IKlubCheckInRegistry.sol";
 
 /// @title KlubEventFactory
 /// @notice Creates KLUB events. One transaction stores the event, deploys or
-/// links the event token on Junoswap, and spends the organizer initial buy.
+/// links the event token on the DEX, and spends the organizer initial buy.
 contract KlubEventFactory {
     using KlubTypes for KlubTypes.EventConfig;
 
