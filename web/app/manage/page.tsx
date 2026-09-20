@@ -134,6 +134,10 @@ function ManageInner() {
           <button className="btn accent wide" disabled={isPending} onClick={() => run(() => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "fundCheckIn", value: parseEther(topUp || "0"), args: [BigInt(eventId), 0n] }))}>
             Fund check-in pool
           </button>
+          <button className="btn ghost wide" disabled={isPending} onClick={() => run(() => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "withdrawProceeds", args: [BigInt(eventId)] }))}>
+            Withdraw ticket proceeds ({amount(state?.organizerProceeds)})
+          </button>
+          <span className="tiny muted">Available once the event has ended, for deposits set to &quot;Organizer keeps it&quot;.</span>
           <div className="grid2">
             <button className="btn ghost" disabled={isPending} onClick={() => run(() => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "finalize", args: [BigInt(eventId)] }))}>
               Finalize
