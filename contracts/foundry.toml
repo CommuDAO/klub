@@ -7,8 +7,10 @@ script = "script"
 solc = "0.8.24"
 optimizer = true
 optimizer_runs = 200
+# KUB predates Shanghai and rejects PUSH0, so never compile past paris
+evm_version = "paris"
 via_ir = true
 
 [rpc_endpoints]
-kub_testnet = "https://rpc-testnet.bitkubchain.io"
-kub_mainnet = "https://rpc.bitkubchain.io"
+kub_testnet = "https://rpc-testnet.kubchain.io"
+kub_mainnet = "https://rpc.kubchain.io"
