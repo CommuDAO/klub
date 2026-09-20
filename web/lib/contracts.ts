@@ -29,7 +29,7 @@ export const factoryAbi = parseAbi([
 
 export const registryAbi = parseAbi([
   "struct Guest { uint8 status; bool invited; uint128 deposit; uint64 checkInTime; uint64 checkOutTime; uint128 refundable; uint256 weight; }",
-  "struct EventState { uint32 activeCount; uint32 waitlistHead; uint32 checkedIn; uint32 checkedOut; uint128 heldDeposits; uint256 totalWeight; bool settled; address kioskKey; address codeAddress; uint64 codeStart; uint64 codeEnd; }",
+  "struct EventState { uint32 activeCount; uint32 waitlistHead; uint32 checkedIn; uint32 checkedOut; uint128 heldDeposits; uint128 organizerProceeds; uint256 totalWeight; bool settled; address kioskKey; address codeAddress; uint64 codeStart; uint64 codeEnd; }",
   "function guestOf(uint256 eventId, address guest) view returns (Guest)",
   "function stateOf(uint256 eventId) view returns (EventState)",
   "function checkedInCount(uint256 eventId) view returns (uint256)",
@@ -40,6 +40,7 @@ export const registryAbi = parseAbi([
   "function rsvp(uint256 eventId)",
   "function cancelRsvp(uint256 eventId)",
   "function withdrawDeposit(uint256 eventId)",
+  "function withdrawProceeds(uint256 eventId)",
   "function claimNoShowRefund(uint256 eventId)",
   "function approve(uint256 eventId, address[] guests)",
   "function reject(uint256 eventId, address[] guests)",
@@ -106,7 +107,7 @@ export const erc20Abi = parseAbi([
 export const adapterAbi = parseAbi(["function faucet(address token, uint256 amount)"]);
 
 export const REWARD_MODE = ["By time at event", "Split equally"] as const;
-export const DESTINATION = ["Refund", "Burn", "Reward pool"] as const;
+export const DESTINATION = ["Refund", "Burn", "Reward pool", "Organizer keeps it"] as const;
 export const GUEST_STATUS = ["None", "Pending", "Approved", "Waitlisted", "Rejected", "Cancelled"] as const;
 export const QUEST_KIND = ["Hold token", "Stay minutes", "Invite checked-in friends", "Booth", "Social post"] as const;
 export const METHOD = { STAFF: 1, KIOSK: 2, CODE: 4 } as const;
