@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
 import { BackBar, WalletButton } from "@/components/Chrome";
-import { contracts, erc20Abi, registryAbi, DESTINATION, GUEST_STATUS, REWARD_MODE } from "@/lib/contracts";
+import { contracts, erc20Abi, profilesAbi, registryAbi, DESTINATION, GUEST_STATUS, REWARD_MODE } from "@/lib/contracts";
+import { explainError } from "@/lib/errors";
 import { useEvent, useEventState, useGuest, usePools } from "@/lib/useEvents";
 import { EventMetadata, ipfsUrl, loadMetadata } from "@/lib/ipfs";
 import { amount, dateRange, shortAddress } from "@/lib/format";
@@ -34,11 +35,20 @@ function EventInner() {
     query: { enabled: Boolean(address && event) }
   });
 
+  const { data: host } = useReadContract({
+    address: contracts.profiles,
+    abi: profilesAbi,
+    functionName: "profileOf",
+    args: event ? [event.organizer] : undefined,
+    query: { enabled: Boolean(event) }
+  });
+
   if (!eventId) return <p className="pad muted">No event selected.</p>;
   if (!event) return <p className="pad muted">Loading event…</p>;
   const ev = event;
 
   const status = Number(guest?.status ?? 0);
+  const isOrganizer = Boolean(address && address.toLowerCase() === event.organizer.toLowerCase());
   const needsApproval = Number(allowance ?? 0n) < Number(event.minHolding);
 
   async function rsvp() {
@@ -61,7 +71,7 @@ function EventInner() {
       });
       await refetchGuest();
     } catch (e) {
-      setError((e as Error).message.split("\n")[0]);
+      setError(explainError(e));
     }
   }
 
@@ -76,7 +86,7 @@ function EventInner() {
       });
       await refetchGuest();
     } catch (e) {
-      setError((e as Error).message.split("\n")[0]);
+      setError(explainError(e));
     }
   }
 
@@ -99,6 +109,11 @@ function EventInner() {
           </div>
 
           <div className="col gap12">
+            {isOrganizer ? (
+              <Link className="btn wide" href={`/manage?id=${eventId}`}>
+                Manage event and approve guests
+              </Link>
+            ) : null}
             {!address ? <WalletButton /> : null}
             {address && status === 0 ? (
               <button className="btn accent wide" disabled={isPending} onClick={rsvp}>
@@ -193,8 +208,9 @@ function EventInner() {
           <div className="col gap8">
             <strong>Host</strong>
             <div className="between">
-              <Link href={`/organizer?address=${event.organizer}`} className="small">
-                {shortAddress(event.organizer)}
+              <Link href={`/organizer?address=${event.organizer}`} className="col">
+                <strong className="small">{host?.name || shortAddress(event.organizer)}</strong>
+                {host?.name ? <span className="tiny muted">{shortAddress(event.organizer)}</span> : null}
               </Link>
               {meta.telegram ? (
                 <a className="chip" href={meta.telegram} target="_blank" rel="noreferrer">
