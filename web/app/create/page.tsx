@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { parseEther, parseEventLogs, parseUnits } from "viem";
+import { encodeAbiParameters, parseAbiParameters, parseEther, parseEventLogs, parseUnits } from "viem";
 import { useAccount, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { BackBar } from "@/components/Chrome";
 import { Notice, NoticeTone } from "@/components/Notice";
@@ -160,6 +160,20 @@ export default function CreatePage() {
     const steps = 2 + (needsName ? 1 : 0);
 
     try {
+      // The launchpad shows logo, description and three links. link1 is the
+      // event page, link2 (X) stays empty, link3 is Telegram, which is the
+      // same order other tokens on the launchpad use.
+      const count = await publicClient.readContract({ address: contracts.factory, abi: factoryAbi, functionName: "eventCount" });
+      const eventUrl = `${window.location.origin}/event?id=${count + 1n}`;
+      const packed = encodeAbiParameters(parseAbiParameters("string, string, string, string, string"), [
+        logo,
+        form.description.trim(),
+        eventUrl,
+        "",
+        form.telegram.trim()
+      ]);
+      const launchInfo = `klub:${packed.slice(2)}`;
+
       setNotice({ tone: "info", text: `Step 1 of ${steps}: creating the event and its token. Confirm in your wallet.` });
       const hash = await writeContractAsync({
         address: contracts.factory,
@@ -171,7 +185,7 @@ export default function CreatePage() {
             token: (form.token || "0x0000000000000000000000000000000000000000") as `0x${string}`,
             name: form.name,
             symbol: form.symbol,
-            metadataCID: logo,
+            metadataCID: launchInfo,
             startTime: toUnix(form.start),
             endTime: toUnix(form.end),
             rewardMode: Number(form.rewardMode),
