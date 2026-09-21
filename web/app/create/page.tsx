@@ -10,6 +10,8 @@ import { contracts, factoryAbi, profilesAbi, DESTINATION, METHOD } from "@/lib/c
 import { explainError } from "@/lib/errors";
 import { coordsFromMapUrl, EventMetadata, ipfsUrl } from "@/lib/ipfs";
 import { pinataReady, uploadCover } from "@/lib/pinata";
+import { useI18n } from "@/lib/i18n";
+import type { TKey } from "@/lib/locales/en";
 
 const toUnix = (value: string) => BigInt(Math.floor(new Date(value).getTime() / 1000));
 
@@ -22,6 +24,7 @@ const toLocalInput = (d: Date) => {
 const MIN_LEAD_MINUTES = 5;
 
 export default function CreatePage() {
+  const { t } = useI18n();
   const router = useRouter();
   const { address } = useAccount();
   const publicClient = usePublicClient();
@@ -68,10 +71,8 @@ export default function CreatePage() {
   const [coverCID, setCoverCID] = useState("");
   const [tokenImageCID, setTokenImageCID] = useState("");
   const [uploading, setUploading] = useState<"" | "cover" | "token">("");
-  const [notice, setNotice] = useState<{ tone: NoticeTone; text: string; link?: string } | undefined>();
+  const [notice, setNotice] = useState<{ tone: NoticeTone; text: string } | undefined>();
   const [working, setWorking] = useState(false);
-
-  const setStatus = (text?: string, tone: NoticeTone = "error") => setNotice(text ? { tone, text } : undefined);
 
   const set = (key: keyof typeof form, value: unknown) => setForm((f) => ({ ...f, [key]: value }));
 
@@ -88,39 +89,31 @@ export default function CreatePage() {
   /// Same rules the factory enforces, checked before the wallet opens so a
   /// bad form never becomes a failed transaction.
   function validate(): string | undefined {
-    if (!address) return "Connect your wallet first.";
-    if (!form.name.trim()) return "Give the event a name.";
-    if (!form.symbol.trim()) return "Give the token a symbol.";
-    if (!form.start || !form.end) return "Set when the event starts and ends.";
+    if (!address) return t("v.connect");
+    if (!form.name.trim()) return t("v.name");
+    if (!form.symbol.trim()) return t("v.symbol");
+    if (!form.start || !form.end) return t("v.times");
     const start = new Date(form.start).getTime();
     const end = new Date(form.end).getTime();
-    if (start < Date.now() + MIN_LEAD_MINUTES * 60 * 1000) {
-      return `Start time must be at least ${MIN_LEAD_MINUTES} minutes from now.`;
-    }
-    if (end <= start) return "End time must be after the start time.";
-    if (form.cutoff && new Date(form.cutoff).getTime() > start) {
-      return "Cancel cutoff must be on or before the start time.";
-    }
-    const holding = Number(form.minHolding || 0);
-    const burn = Number(form.burnAmount || 0);
-    if (burn > holding) return "Burn at check-in cannot be more than the amount held.";
-    if (Number(form.rewardMode) === 0 && Number(form.minCredit) <= 0) return "Minimum credit must be above 0.";
-    if (!form.token && Number(form.initialBuy || 0) <= 0.1) {
-      return "Initial buy must be more than 0.1 KUB, the launchpad keeps 0.1 KUB as the creation fee.";
-    }
+    if (start < Date.now() + MIN_LEAD_MINUTES * 60 * 1000) return t("v.startLead", { minutes: MIN_LEAD_MINUTES });
+    if (end <= start) return t("v.endAfter");
+    if (form.cutoff && new Date(form.cutoff).getTime() > start) return t("v.cutoff");
+    if (Number(form.burnAmount || 0) > Number(form.minHolding || 0)) return t("v.burn");
+    if (Number(form.rewardMode) === 0 && Number(form.minCredit) <= 0) return t("v.minCredit");
+    if (!form.token && Number(form.initialBuy || 0) <= 0.1) return t("v.initialBuy");
     return undefined;
   }
 
   async function onImagePicked(kind: "cover" | "token", file?: File) {
     if (!file) return;
-    setStatus(undefined);
+    setNotice(undefined);
     setUploading(kind);
     try {
       const cid = await uploadCover(file);
       if (kind === "cover") setCoverCID(cid);
       else setTokenImageCID(cid);
     } catch (e) {
-      setStatus((e as Error).message);
+      setNotice({ tone: "error", text: explainError(e, t) });
     } finally {
       setUploading("");
     }
@@ -142,22 +135,19 @@ export default function CreatePage() {
   }
 
   async function submit() {
-    setStatus(undefined);
+    setNotice(undefined);
     const problem = validate();
     if (problem) {
-      setStatus(problem);
+      setNotice({ tone: "error", text: problem });
       return;
     }
     if (!publicClient) return;
     setWorking(true);
 
-    // The launchpad keeps whatever we pass as the token logo, so the first
-    // transaction carries only the image link. The full event details are
-    // written to KLUB right after with setMetadata.
     const logoCID = tokenImageCID || coverCID;
     const logo = logoCID ? ipfsUrl(logoCID) : "";
     const needsName = Boolean(form.organizerName.trim()) && form.organizerName.trim() !== (profile?.name ?? "");
-    const steps = 2 + (needsName ? 1 : 0);
+    const total = 2 + (needsName ? 1 : 0);
 
     try {
       // The launchpad shows logo, description and three links. link1 is the
@@ -174,7 +164,7 @@ export default function CreatePage() {
       ]);
       const launchInfo = `klub:${packed.slice(2)}`;
 
-      setNotice({ tone: "info", text: `Step 1 of ${steps}: creating the event and its token. Confirm in your wallet.` });
+      setNotice({ tone: "info", text: t("create.step1", { n: 1, total }) });
       const hash = await writeContractAsync({
         address: contracts.factory,
         abi: factoryAbi,
@@ -208,14 +198,14 @@ export default function CreatePage() {
           }
         ]
       });
-      setNotice({ tone: "info", text: "Waiting for the transaction to be confirmed…" });
+      setNotice({ tone: "info", text: t("create.waiting") });
       const receipt = await publicClient.waitForTransactionReceipt({ hash });
-      if (receipt.status !== "success") throw new Error("The create transaction failed on chain.");
+      if (receipt.status !== "success") throw new Error(t("create.failedOnChain"));
       const created = parseEventLogs({ abi: factoryAbi, eventName: "EventCreated", logs: receipt.logs })[0];
-      if (!created) throw new Error("The event was created but its number could not be read.");
+      if (!created) throw new Error(t("create.noEventId"));
       const eventId = created.args.eventId;
 
-      setNotice({ tone: "info", text: `Step 2 of ${steps}: saving the event details. Confirm in your wallet.` });
+      setNotice({ tone: "info", text: t("create.step2", { n: 2, total }) });
       const metaHash = await writeContractAsync({
         address: contracts.factory,
         abi: factoryAbi,
@@ -225,7 +215,7 @@ export default function CreatePage() {
       await publicClient.waitForTransactionReceipt({ hash: metaHash });
 
       if (needsName) {
-        setNotice({ tone: "info", text: `Step 3 of ${steps}: saving your organizer name. Confirm in your wallet.` });
+        setNotice({ tone: "info", text: t("create.step3", { n: 3, total }) });
         const nameHash = await writeContractAsync({
           address: contracts.profiles,
           abi: profilesAbi,
@@ -235,49 +225,55 @@ export default function CreatePage() {
         await publicClient.waitForTransactionReceipt({ hash: nameHash });
       }
 
-      setNotice({ tone: "success", text: "Event created. Opening it now…" });
+      setNotice({ tone: "success", text: t("create.done") });
       router.push(`/event?id=${eventId}`);
     } catch (e) {
-      setNotice({ tone: "error", text: explainError(e) });
+      setNotice({ tone: "error", text: explainError(e, t) });
     } finally {
       setWorking(false);
     }
   }
 
-  const policyRows: [string, keyof typeof form][] = [
-    ["Left after burn", "remainder"],
-    ["Cancel before cutoff", "cancelBefore"],
-    ["Cancel after cutoff", "cancelAfter"],
-    ["Rejected RSVP", "rejected"],
-    ["No-show", "noShow"]
+  const policyRows: [TKey, keyof typeof form][] = [
+    ["policy.remainder", "remainder"],
+    ["policy.cancelBefore", "cancelBefore"],
+    ["policy.cancelAfter", "cancelAfter"],
+    ["policy.rejected", "rejected"],
+    ["policy.noShow", "noShow"]
+  ];
+
+  const methods: [TKey, number][] = [
+    ["method.staff", METHOD.STAFF],
+    ["method.kiosk", METHOD.KIOSK],
+    ["method.code", METHOD.CODE]
   ];
 
   return (
     <div className="shell">
-      <BackBar title="Create event" />
+      <BackBar title={t("create.title")} />
       <main className="pad col gap16">
         <div className="card col gap12">
-          <strong>About the event</strong>
+          <strong>{t("create.about")}</strong>
 
           <label className="col gap8">
-            <span className="label">Event name</span>
+            <span className="label">{t("create.eventName")}</span>
             <input className="field" value={form.name} onChange={(e) => set("name", e.target.value)} />
           </label>
 
           <label className="col gap8">
-            <span className="label">Token symbol</span>
+            <span className="label">{t("create.symbol")}</span>
             <input className="field" value={form.symbol} onChange={(e) => set("symbol", e.target.value)} placeholder="KNIGHT" />
           </label>
 
           <label className="col gap8">
-            <span className="label">Organizer name</span>
-            <input className="field" value={form.organizerName} onChange={(e) => set("organizerName", e.target.value)} placeholder="Shown as the host on every event you run" />
+            <span className="label">{t("create.organizerName")}</span>
+            <input className="field" value={form.organizerName} onChange={(e) => set("organizerName", e.target.value)} placeholder={t("create.organizerNameHint")} />
           </label>
 
           <div className="col gap8">
-            <span className="label">Cover image</span>
-            <span className="tiny muted">Square, 1200 × 1200 px works best. JPG or PNG, up to 5 MB.</span>
-            {coverCID ? <img className="cover" src={ipfsUrl(coverCID)} alt="Cover preview" /> : null}
+            <span className="label">{t("create.cover")}</span>
+            <span className="tiny muted">{t("create.coverHint")}</span>
+            {coverCID ? <img className="cover" src={ipfsUrl(coverCID)} alt="" /> : null}
             <input
               className="field"
               type="file"
@@ -286,15 +282,15 @@ export default function CreatePage() {
               onChange={(e) => onImagePicked("cover", e.target.files?.[0])}
               style={{ paddingTop: 11 }}
             />
-            {uploading === "cover" ? <span className="tiny muted">Uploading to IPFS…</span> : null}
-            {!pinataReady ? <span className="tiny muted">Image upload is not configured on this deployment.</span> : null}
+            {uploading === "cover" ? <span className="tiny muted">{t("create.uploading")}</span> : null}
+            {!pinataReady ? <span className="tiny muted">{t("create.uploadOff")}</span> : null}
           </div>
 
           <div className="col gap8">
-            <span className="label">Token image</span>
-            <span className="tiny muted">Shown on the launchpad. Square, 512 × 512 px. Leave empty to use the cover.</span>
+            <span className="label">{t("create.tokenImage")}</span>
+            <span className="tiny muted">{t("create.tokenImageHint")}</span>
             {tokenImageCID ? (
-              <img src={ipfsUrl(tokenImageCID)} alt="Token image preview" style={{ width: 96, height: 96, borderRadius: 16, objectFit: "cover" }} />
+              <img src={ipfsUrl(tokenImageCID)} alt="" style={{ width: 96, height: 96, borderRadius: 16, objectFit: "cover" }} />
             ) : null}
             <input
               className="field"
@@ -304,140 +300,133 @@ export default function CreatePage() {
               onChange={(e) => onImagePicked("token", e.target.files?.[0])}
               style={{ paddingTop: 11 }}
             />
-            {uploading === "token" ? <span className="tiny muted">Uploading to IPFS…</span> : null}
+            {uploading === "token" ? <span className="tiny muted">{t("create.uploading")}</span> : null}
           </div>
 
           <label className="col gap8">
-            <span className="label">Description</span>
+            <span className="label">{t("create.description")}</span>
             <textarea
               className="field area"
               value={form.description}
               onChange={(e) => set("description", e.target.value)}
-              placeholder="What happens at this event, who it is for, what to bring."
+              placeholder={t("create.descriptionHint")}
             />
           </label>
         </div>
 
         <div className="card col gap12">
-          <strong>Where and when</strong>
+          <strong>{t("create.whereWhen")}</strong>
 
           <label className="col gap8">
-            <span className="label">Venue name</span>
-            <input className="field" value={form.venue} onChange={(e) => set("venue", e.target.value)} placeholder="Foundry, Sukhumvit 49" />
+            <span className="label">{t("create.venue")}</span>
+            <input className="field" value={form.venue} onChange={(e) => set("venue", e.target.value)} />
           </label>
 
           <label className="col gap8">
-            <span className="label">Google Maps link</span>
+            <span className="label">{t("create.mapLink")}</span>
             <input className="field" value={form.mapUrl} onChange={(e) => set("mapUrl", e.target.value)} placeholder="https://maps.app.goo.gl/…" />
-            <span className="tiny muted">Paste the share link. Coordinates are read from it for the map and weather.</span>
+            <span className="tiny muted">{t("create.mapHint")}</span>
           </label>
 
           <label className="col gap8">
-            <span className="label">Telegram group link</span>
+            <span className="label">{t("create.telegram")}</span>
             <input className="field" value={form.telegram} onChange={(e) => set("telegram", e.target.value)} placeholder="https://t.me/…" />
-            <span className="tiny muted">Shown to guests once they have RSVP'd.</span>
+            <span className="tiny muted">{t("create.telegramHint")}</span>
           </label>
 
           <label className="col gap8">
-            <span className="label">Starts</span>
+            <span className="label">{t("create.starts")}</span>
             <input className="field" type="datetime-local" value={form.start} onChange={(e) => set("start", e.target.value)} />
           </label>
 
           <label className="col gap8">
-            <span className="label">Ends</span>
+            <span className="label">{t("create.ends")}</span>
             <input className="field" type="datetime-local" value={form.end} onChange={(e) => set("end", e.target.value)} />
           </label>
         </div>
 
         <div className="card col gap12">
-          <strong>Guests and check-in</strong>
+          <strong>{t("create.guests")}</strong>
           <label className="between">
-            <span className="small">Capacity (0 = unlimited)</span>
+            <span className="small">{t("create.capacity")}</span>
             <input className="field" style={{ width: 110 }} value={form.capacity} onChange={(e) => set("capacity", e.target.value)} />
           </label>
           <label className="between">
-            <span className="small">Hold to check in</span>
+            <span className="small">{t("create.hold")}</span>
             <input className="field" style={{ width: 110 }} value={form.minHolding} onChange={(e) => set("minHolding", e.target.value)} />
           </label>
           <label className="between">
-            <span className="small">Burn at check-in</span>
+            <span className="small">{t("create.burn")}</span>
             <input className="field" style={{ width: 110 }} value={form.burnAmount} onChange={(e) => set("burnAmount", e.target.value)} />
           </label>
           <label className="between">
-            <span className="small">Require approval</span>
+            <span className="small">{t("create.requireApproval")}</span>
             <input type="checkbox" checked={form.requireApproval} onChange={(e) => set("requireApproval", e.target.checked)} />
           </label>
           <div className="row gap8" style={{ flexWrap: "wrap" }}>
-            {[
-              ["Staff scan", METHOD.STAFF],
-              ["Kiosk QR", METHOD.KIOSK],
-              ["Secret code", METHOD.CODE]
-            ].map(([label, bit]) => (
+            {methods.map(([label, bit]) => (
               <button
-                key={label as string}
+                key={label}
                 className="chip"
-                style={form.methods & (bit as number) ? { background: "var(--ink)", color: "#fff" } : {}}
-                onClick={() => set("methods", form.methods ^ (bit as number))}
+                style={form.methods & bit ? { background: "var(--ink)", color: "#fff" } : {}}
+                onClick={() => set("methods", form.methods ^ bit)}
               >
-                {label as string}
+                {t(label)}
               </button>
             ))}
           </div>
         </div>
 
         <div className="card col gap12">
-          <strong>Rewards</strong>
+          <strong>{t("create.rewards")}</strong>
           <label className="between">
-            <span className="small">Mode</span>
+            <span className="small">{t("create.mode")}</span>
             <select className="field" style={{ width: 190 }} value={form.rewardMode} onChange={(e) => set("rewardMode", e.target.value)}>
-              <option value={0}>By time at event</option>
-              <option value={1}>Split equally</option>
+              <option value={0}>{t("mode.0")}</option>
+              <option value={1}>{t("mode.1")}</option>
             </select>
           </label>
           <label className="between">
-            <span className="small">Minimum credit (minutes)</span>
+            <span className="small">{t("create.minCredit")}</span>
             <input className="field" style={{ width: 110 }} value={form.minCredit} onChange={(e) => set("minCredit", e.target.value)} />
           </label>
         </div>
 
         <div className="card col gap12">
-          <strong>Refund policy (locked after create)</strong>
+          <strong>{t("create.policy")}</strong>
           {policyRows.map(([label, key]) => (
             <label className="between" key={key}>
-              <span className="small">{label}</span>
-              <select className="field" style={{ width: 150 }} value={form[key] as number} onChange={(e) => set(key, e.target.value)}>
-                {DESTINATION.map((d, i) => (
-                  <option key={d} value={i}>
-                    {d}
+              <span className="small">{t(label)}</span>
+              <select className="field" style={{ width: 160 }} value={form[key] as number} onChange={(e) => set(key, e.target.value)}>
+                {DESTINATION.map((_, i) => (
+                  <option key={i} value={i}>
+                    {t(`dest.${i}` as TKey)}
                   </option>
                 ))}
               </select>
             </label>
           ))}
           <label className="col gap8">
-            <span className="label">Cancel cutoff</span>
+            <span className="label">{t("create.cutoff")}</span>
             <input className="field" type="datetime-local" value={form.cutoff} onChange={(e) => set("cutoff", e.target.value)} />
-            <span className="tiny muted">Must be on or before the start time. Leave empty to use the start time.</span>
+            <span className="tiny muted">{t("create.cutoffHint")}</span>
           </label>
         </div>
 
         <div className="card col gap12">
           <label className="col gap8">
-            <span className="label">Initial buy (KUB)</span>
+            <span className="label">{t("create.initialBuy")}</span>
             <input className="field" value={form.initialBuy} onChange={(e) => set("initialBuy", e.target.value)} />
-            <span className="tiny muted">
-              Minimum {minInitialBuy ? Number(minInitialBuy) / 1e18 : 0.1} KUB. The launchpad keeps 0.1 KUB as the token
-              creation fee, so send more than that or the transaction reverts.
-            </span>
+            <span className="tiny muted">{t("create.initialBuyHint", { min: minInitialBuy ? Number(minInitialBuy) / 1e18 : 0.1 })}</span>
           </label>
 
           <label className="col gap8">
-            <span className="label">Existing token address (optional)</span>
-            <input className="field" value={form.token} onChange={(e) => set("token", e.target.value)} placeholder="0x… — leave empty to create a new token" />
+            <span className="label">{t("create.existingToken")}</span>
+            <input className="field" value={form.token} onChange={(e) => set("token", e.target.value)} placeholder={t("create.existingTokenHint")} />
           </label>
 
           <button className="btn accent wide" disabled={isPending || working || uploading !== ""} onClick={submit}>
-            {working ? "Working…" : "Create event and buy"}
+            {working ? t("common.working") : t("create.submit")}
           </button>
           {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
         </div>

@@ -7,12 +7,15 @@ import { parseEther } from "viem";
 import { useAccount, usePublicClient, useReadContract, useReadContracts, useWriteContract } from "wagmi";
 import { BackBar } from "@/components/Chrome";
 import { Notice, NoticeTone } from "@/components/Notice";
-import { contracts, factoryAbi, registryAbi, vaultAbi, GUEST_STATUS } from "@/lib/contracts";
+import { contracts, factoryAbi, registryAbi, vaultAbi } from "@/lib/contracts";
 import { explainError } from "@/lib/errors";
 import { useEvent, useEventState } from "@/lib/useEvents";
 import { amount, shortAddress } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
+import type { TKey } from "@/lib/locales/en";
 
 function ManageInner() {
+  const { t } = useI18n();
   const params = useSearchParams();
   const eventId = Number(params.get("id") ?? 0);
   const { address } = useAccount();
@@ -51,23 +54,26 @@ function ManageInner() {
     query: { enabled: guestList.length > 0 }
   });
 
-  async function run(label: string, fn: () => Promise<`0x${string}`>) {
-    setNotice({ tone: "info", text: `${label}: confirm in your wallet.` });
+  async function run(labelKey: TKey, fn: () => Promise<`0x${string}`>) {
+    const label = t(labelKey);
+    setNotice({ tone: "info", text: t("manage.confirm", { label }) });
     try {
       const hash = await fn();
-      setNotice({ tone: "info", text: `${label}: waiting for confirmation…` });
+      setNotice({ tone: "info", text: t("manage.waiting", { label }) });
       if (publicClient) await publicClient.waitForTransactionReceipt({ hash });
-      setNotice({ tone: "success", text: `${label}: done.` });
+      setNotice({ tone: "success", text: t("manage.done", { label }) });
       await Promise.all([refetchRsvps(), refetchGuests()]);
     } catch (e) {
-      setNotice({ tone: "error", text: explainError(e) });
+      setNotice({ tone: "error", text: explainError(e, t) });
     }
   }
 
-  const decide = (label: string, fn: "approve" | "reject", who: `0x${string}`[]) =>
-    run(label, () =>
+  const decide = (labelKey: TKey, fn: "approve" | "reject", who: `0x${string}`[]) =>
+    run(labelKey, () =>
       writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: fn, args: [BigInt(eventId), who] })
     );
+
+  const statusOf = (i: number) => Number((guestStates?.[i]?.result as { status: number } | undefined)?.status ?? 0);
 
   const guests = guestInput
     .split(/[\s,]+/)
@@ -76,15 +82,15 @@ function ManageInner() {
   if (!eventId) {
     return (
       <div className="shell">
-        <BackBar title="Manage events" />
+        <BackBar title={t("manage.list")} />
         <main className="pad col gap12">
           {(myEvents ?? []).map((id) => (
             <Link key={String(id)} className="card between" href={`/manage?id=${id}`}>
-              <strong>Event #{String(id)}</strong>
-              <span className="muted small">Open</span>
+              <strong>{t("common.event", { id: String(id) })}</strong>
+              <span className="muted small">{t("manage.open")}</span>
             </Link>
           ))}
-          {(myEvents ?? []).length === 0 ? <p className="muted small">You have not created an event yet.</p> : null}
+          {(myEvents ?? []).length === 0 ? <p className="muted small">{t("manage.none")}</p> : null}
         </main>
       </div>
     );
@@ -92,44 +98,28 @@ function ManageInner() {
 
   return (
     <div className="shell">
-      <BackBar title={`Manage #${eventId}`} href="/manage" />
+      <BackBar title={t("manage.title", { id: eventId })} href="/manage" />
       <main className="pad col gap16">
         <div className="grid2">
           <div className="card col">
-            <span className="tiny muted">Checked in</span>
-            <strong className="display" style={{ fontSize: 22 }}>{Number(state?.checkedIn ?? 0)}</strong>
+            <span className="tiny muted">{t("event.checkedIn")}</span>
+            <strong className="display" style={{ fontSize: 22 }}>
+              {Number(state?.checkedIn ?? 0)}
+            </strong>
           </div>
           <div className="card col">
-            <span className="tiny muted">Checked out</span>
-            <strong className="display" style={{ fontSize: 22 }}>{Number(state?.checkedOut ?? 0)}</strong>
+            <span className="tiny muted">{t("manage.checkedOut")}</span>
+            <strong className="display" style={{ fontSize: 22 }}>
+              {Number(state?.checkedOut ?? 0)}
+            </strong>
           </div>
         </div>
 
         <div className="card col gap12">
-          <strong>Guests</strong>
-          <textarea
-            className="field area"
-            placeholder="0x… addresses, separated by spaces or commas"
-            value={guestInput}
-            onChange={(e) => setGuestInput(e.target.value)}
-          />
-          <div className="grid2">
-            <button className="btn" disabled={isPending || guests.length === 0} onClick={() => run("Approve", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "approve", args: [BigInt(eventId), guests] }))}>
-              Approve
-            </button>
-            <button className="btn ghost" disabled={isPending || guests.length === 0} onClick={() => run("Reject", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "reject", args: [BigInt(eventId), guests] }))}>
-              Reject
-            </button>
-            <button className="btn ghost" disabled={isPending || guests.length === 0} onClick={() => run("Invite", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "invite", args: [BigInt(eventId), guests] }))}>
-              Invite
-            </button>
-            <button className="btn ghost" disabled={isPending || guests.length === 0} onClick={() => run("Check in", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "checkInBatch", args: [BigInt(eventId), guests] }))}>
-              Check in
-            </button>
-          </div>
+          <strong>{t("manage.guests")}</strong>
           <div className="col gap8">
-            <span className="label">RSVPs ({guestList.length})</span>
-            {guestList.length === 0 ? <span className="small muted">No one has RSVP'd yet.</span> : null}
+            <span className="label">{t("manage.rsvps", { count: guestList.length })}</span>
+            {guestList.length === 0 ? <span className="small muted">{t("manage.noRsvps")}</span> : null}
             {guestList.map((g, i) => {
               const info = guestStates?.[i]?.result as { status: number; checkInTime: bigint } | undefined;
               const statusIndex = Number(info?.status ?? 0);
@@ -138,73 +128,115 @@ function ManageInner() {
                 <div key={g} className="between divider" style={{ padding: "8px 0" }}>
                   <div className="col">
                     <span className="small">{shortAddress(g)}</span>
-                    <span className="tiny muted">{checkedIn ? "Checked in" : GUEST_STATUS[statusIndex]}</span>
+                    <span className="tiny muted">{checkedIn ? t("event.checkedIn") : t(`status.${statusIndex}` as TKey)}</span>
                   </div>
                   <div className="row gap8">
                     {statusIndex === 1 ? (
-                      <button className="chip" disabled={isPending} onClick={() => decide("Approve", "approve", [g])}>
-                        Approve
+                      <button className="chip" disabled={isPending} onClick={() => decide("manage.approve", "approve", [g])}>
+                        {t("manage.approve")}
                       </button>
                     ) : null}
                     {statusIndex === 1 || statusIndex === 2 ? (
-                      <button className="chip" disabled={isPending} onClick={() => decide("Reject", "reject", [g])}>
-                        Reject
+                      <button className="chip" disabled={isPending} onClick={() => decide("manage.reject", "reject", [g])}>
+                        {t("manage.reject")}
                       </button>
                     ) : null}
                   </div>
                 </div>
               );
             })}
-            {guestStates?.some((r) => Number((r.result as { status: number } | undefined)?.status) === 1) ? (
+            {guestList.some((_, i) => statusOf(i) === 1) ? (
               <button
                 className="btn wide"
                 disabled={isPending}
-                onClick={() =>
-                  decide(
-                    "Approve all pending",
-                    "approve",
-                    guestList.filter((_, i) => Number((guestStates?.[i]?.result as { status: number } | undefined)?.status) === 1)
-                  )
-                }
+                onClick={() => decide("manage.approveAll", "approve", guestList.filter((_, i) => statusOf(i) === 1))}
               >
-                Approve all pending
+                {t("manage.approveAll")}
               </button>
             ) : null}
           </div>
-        </div>
 
-        <div className="card col gap12">
-          <strong>Door</strong>
-          <Link className="btn ghost wide" href={`/kiosk?id=${eventId}`}>
-            Open kiosk screen
-          </Link>
-          <button className="btn ghost wide" disabled={isPending || guests.length !== 1} onClick={() => run("Add staff", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "setStaff", args: [BigInt(eventId), guests[0], true] }))}>
-            Add first address above as staff
-          </button>
-        </div>
-
-        <div className="card col gap12">
-          <strong>Rewards</strong>
-          <label className="between">
-            <span className="small">Top up (KUB)</span>
-            <input className="field" style={{ width: 120 }} value={topUp} onChange={(e) => setTopUp(e.target.value)} />
-          </label>
-          <button className="btn accent wide" disabled={isPending} onClick={() => run("Fund pool", () => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "fundCheckIn", value: parseEther(topUp || "0"), args: [BigInt(eventId), 0n] }))}>
-            Fund check-in pool
-          </button>
-          <button className="btn ghost wide" disabled={isPending} onClick={() => run("Withdraw proceeds", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "withdrawProceeds", args: [BigInt(eventId)] }))}>
-            Withdraw ticket proceeds ({amount(state?.organizerProceeds)})
-          </button>
-          <span className="tiny muted">Available once the event has ended, for deposits set to &quot;Organizer keeps it&quot;.</span>
+          <textarea className="field area" placeholder={t("manage.paste")} value={guestInput} onChange={(e) => setGuestInput(e.target.value)} />
           <div className="grid2">
-            <button className="btn ghost" disabled={isPending} onClick={() => run("Finalize", () => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "finalize", args: [BigInt(eventId)] }))}>
-              Finalize
+            <button className="btn" disabled={isPending || guests.length === 0} onClick={() => decide("manage.approve", "approve", guests)}>
+              {t("manage.approve")}
             </button>
-            <button className="btn ghost" disabled={isPending} onClick={() => run("Withdraw leftover", () => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "withdrawLeftover", args: [BigInt(eventId)] }))}>
-              Withdraw leftover
+            <button className="btn ghost" disabled={isPending || guests.length === 0} onClick={() => decide("manage.reject", "reject", guests)}>
+              {t("manage.reject")}
+            </button>
+            <button
+              className="btn ghost"
+              disabled={isPending || guests.length === 0}
+              onClick={() => run("manage.invite", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "invite", args: [BigInt(eventId), guests] }))}
+            >
+              {t("manage.invite")}
+            </button>
+            <button
+              className="btn ghost"
+              disabled={isPending || guests.length === 0}
+              onClick={() => run("manage.checkIn", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "checkInBatch", args: [BigInt(eventId), guests] }))}
+            >
+              {t("manage.checkIn")}
             </button>
           </div>
-          {event ? <span className="tiny muted">Deposit {amount(event.minHolding)} · burn {amount(event.burnAmount)}</span> : null}
+        </div>
+
+        <div className="card col gap12">
+          <strong>{t("manage.door")}</strong>
+          <Link className="btn ghost wide" href={`/kiosk?id=${eventId}`}>
+            {t("manage.kiosk")}
+          </Link>
+          <button
+            className="btn ghost wide"
+            disabled={isPending || guests.length !== 1}
+            onClick={() => run("manage.addStaff", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "setStaff", args: [BigInt(eventId), guests[0], true] }))}
+          >
+            {t("manage.addStaff")}
+          </button>
+        </div>
+
+        <div className="card col gap12">
+          <strong>{t("manage.rewards")}</strong>
+          <label className="between">
+            <span className="small">{t("manage.topUp")}</span>
+            <input className="field" style={{ width: 120 }} value={topUp} onChange={(e) => setTopUp(e.target.value)} />
+          </label>
+          <button
+            className="btn accent wide"
+            disabled={isPending}
+            onClick={() => run("manage.fund", () => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "fundCheckIn", value: parseEther(topUp || "0"), args: [BigInt(eventId), 0n] }))}
+          >
+            {t("manage.fund")}
+          </button>
+          <button
+            className="btn ghost wide"
+            disabled={isPending}
+            onClick={() => run("manage.withdrawProceeds", () => writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: "withdrawProceeds", args: [BigInt(eventId)] }))}
+          >
+            {t("manage.withdrawProceeds", { amount: amount(state?.organizerProceeds) })}
+          </button>
+          <span className="tiny muted">{t("manage.proceedsHint")}</span>
+          <div className="grid2">
+            <button
+              className="btn ghost"
+              disabled={isPending}
+              onClick={() => run("manage.finalize", () => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "finalize", args: [BigInt(eventId)] }))}
+            >
+              {t("manage.finalize")}
+            </button>
+            <button
+              className="btn ghost"
+              disabled={isPending}
+              onClick={() => run("manage.leftover", () => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "withdrawLeftover", args: [BigInt(eventId)] }))}
+            >
+              {t("manage.leftover")}
+            </button>
+          </div>
+          {event ? (
+            <span className="tiny muted">
+              {t("manage.depositBurn", { deposit: amount(event.minHolding), burn: amount(event.burnAmount) })}
+            </span>
+          ) : null}
         </div>
         {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
       </main>
@@ -214,7 +246,7 @@ function ManageInner() {
 
 export default function ManagePage() {
   return (
-    <Suspense fallback={<p className="pad muted">Loading…</p>}>
+    <Suspense fallback={null}>
       <ManageInner />
     </Suspense>
   );
