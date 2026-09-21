@@ -1,13 +1,15 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { parseEther } from "viem";
-import { useAccount, usePublicClient, useReadContract, useReadContracts, useWriteContract } from "wagmi";
+import { parseUnits } from "viem";
+import { useAccount, usePublicClient, useReadContract, useReadContracts, useSignMessage, useWriteContract } from "wagmi";
 import { BackBar } from "@/components/Chrome";
 import { Notice, NoticeTone } from "@/components/Notice";
-import { contracts, factoryAbi, registryAbi, vaultAbi } from "@/lib/contracts";
+import { contracts, erc20Abi, factoryAbi, registryAbi, secretsAbi, vaultAbi } from "@/lib/contracts";
+import { EventMetadata, loadMetadata } from "@/lib/ipfs";
+import { eventKeyMessage, keyFromSignature, sealKey, ZERO_KEY } from "@/lib/secrets";
 import { explainError } from "@/lib/errors";
 import { useEvent, useEventState } from "@/lib/useEvents";
 import { amount, shortAddress } from "@/lib/format";
@@ -23,9 +25,15 @@ function ManageInner() {
   const { data: state } = useEventState(eventId || undefined);
   const publicClient = usePublicClient();
   const { writeContractAsync, isPending } = useWriteContract();
+  const { signMessageAsync } = useSignMessage();
+  const [meta, setMeta] = useState<EventMetadata>({});
   const [guestInput, setGuestInput] = useState("");
-  const [topUp, setTopUp] = useState("1");
+  const [topUp, setTopUp] = useState("100");
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>();
+
+  useEffect(() => {
+    if (event?.metadataCID) loadMetadata(event.metadataCID).then(setMeta);
+  }, [event?.metadataCID]);
 
   const { data: myEvents } = useReadContract({
     address: contracts.factory,
@@ -54,7 +62,7 @@ function ManageInner() {
     query: { enabled: guestList.length > 0 }
   });
 
-  async function run(labelKey: TKey, fn: () => Promise<`0x${string}`>) {
+  async function run(labelKey: TKey | "manage.shareLocation", fn: () => Promise<`0x${string}`>) {
     const label = t(labelKey);
     setNotice({ tone: "info", text: t("manage.confirm", { label }) });
     try {
@@ -68,10 +76,52 @@ function ManageInner() {
     }
   }
 
-  const decide = (labelKey: TKey, fn: "approve" | "reject", who: `0x${string}`[]) =>
-    run(labelKey, () =>
+  /// Seals the event key to every listed guest that has published a key, and
+  /// stores the sealed copies on chain. Returns how many guests had no key.
+  async function shareLocation(who: readonly `0x${string}`[]) {
+    const box = meta.private;
+    if (!box || !publicClient || who.length === 0) return;
+    setNotice({ tone: "info", text: t("manage.signShare") });
+    const eventKey = keyFromSignature(await signMessageAsync({ message: eventKeyMessage(box.salt) }));
+    const keys = await publicClient.readContract({
+      address: contracts.secrets,
+      abi: secretsAbi,
+      functionName: "encryptionKeysOf",
+      args: [[...who]]
+    });
+    const ready = who.filter((_, i) => keys[i] !== ZERO_KEY);
+    const missing = who.length - ready.length;
+    if (ready.length > 0) {
+      const sealed = await Promise.all(ready.map((_, i) => sealKey(eventKey, keys[who.indexOf(ready[i])])));
+      await run("manage.shareLocation", () =>
+        writeContractAsync({ address: contracts.secrets, abi: secretsAbi, functionName: "shareKeys", args: [BigInt(eventId), ready, sealed] })
+      );
+    }
+    if (missing > 0) setNotice({ tone: "error", text: t("manage.missingKeys", { count: missing }) });
+  }
+
+  const decide = async (labelKey: TKey, fn: "approve" | "reject", who: `0x${string}`[]) => {
+    await run(labelKey, () =>
       writeContractAsync({ address: contracts.registry, abi: registryAbi, functionName: fn, args: [BigInt(eventId), who] })
     );
+    if (fn === "approve" && meta.private) {
+      try {
+        await shareLocation(who);
+      } catch (e) {
+        setNotice({ tone: "error", text: explainError(e, t) });
+      }
+    }
+  };
+
+  async function fundWithTokens() {
+    if (!event || !publicClient) return;
+    const value = parseUnits(topUp || "0", 18);
+    await run("manage.fund", async () => {
+      const approveHash = await writeContractAsync({ address: event.token, abi: erc20Abi, functionName: "approve", args: [contracts.vault, value] });
+      await publicClient.waitForTransactionReceipt({ hash: approveHash });
+      return writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "fundCheckIn", args: [BigInt(eventId), value] });
+    });
+  }
 
   const statusOf = (i: number) => Number((guestStates?.[i]?.result as { status: number } | undefined)?.status ?? 0);
 
@@ -145,6 +195,15 @@ function ManageInner() {
                 </div>
               );
             })}
+            {meta.private && guestList.some((_, i) => statusOf(i) === 2) ? (
+              <button
+                className="btn ghost wide"
+                disabled={isPending}
+                onClick={() => shareLocation(guestList.filter((_, i) => statusOf(i) === 2)).catch((e) => setNotice({ tone: "error", text: explainError(e, t) }))}
+              >
+                {t("manage.shareLocation")}
+              </button>
+            ) : null}
             {guestList.some((_, i) => statusOf(i) === 1) ? (
               <button
                 className="btn wide"
@@ -198,13 +257,13 @@ function ManageInner() {
         <div className="card col gap12">
           <strong>{t("manage.rewards")}</strong>
           <label className="between">
-            <span className="small">{t("manage.topUp")}</span>
+            <span className="small">{t("manage.topUpToken")}</span>
             <input className="field" style={{ width: 120 }} value={topUp} onChange={(e) => setTopUp(e.target.value)} />
           </label>
           <button
             className="btn accent wide"
             disabled={isPending}
-            onClick={() => run("manage.fund", () => writeContractAsync({ address: contracts.vault, abi: vaultAbi, functionName: "fundCheckIn", value: parseEther(topUp || "0"), args: [BigInt(eventId), 0n] }))}
+            onClick={fundWithTokens}
           >
             {t("manage.fund")}
           </button>

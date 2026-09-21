@@ -3,12 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
-import { BackBar, WalletButton } from "@/components/Chrome";
+import { BackBar } from "@/components/Chrome";
 import { contracts, profilesAbi } from "@/lib/contracts";
 import { explainError } from "@/lib/errors";
 import { kubChain } from "@/lib/chain";
 import { shortAddress } from "@/lib/format";
-import { LanguageSelect, useI18n } from "@/lib/i18n";
+import { useI18n } from "@/lib/i18n";
 
 export default function SettingsPage() {
   const { t } = useI18n();
@@ -46,11 +46,6 @@ export default function SettingsPage() {
       <BackBar title={t("settings.title")} />
       <main className="pad col gap16">
         <div className="card col gap8">
-          <strong>{t("common.language")}</strong>
-          <LanguageSelect />
-        </div>
-
-        <div className="card col gap8">
           <div className="between">
             <span className="muted small">{t("settings.wallet")}</span>
             <strong>{address ? shortAddress(address) : t("settings.notConnected")}</strong>
@@ -59,7 +54,6 @@ export default function SettingsPage() {
             <span className="muted small">{t("settings.network")}</span>
             <strong>{chainId === kubChain.id ? kubChain.name : t("settings.switchTo", { name: kubChain.name })}</strong>
           </div>
-          <WalletButton />
         </div>
 
         <div className="card col gap8">

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import QRCode from "qrcode";
 import { useAccount, useWriteContract } from "wagmi";
-import { BackBar, WalletButton } from "@/components/Chrome";
+import { BackBar, ConnectOnHome } from "@/components/Chrome";
 import { contracts, registryAbi, vaultAbi } from "@/lib/contracts";
 import { explainError } from "@/lib/errors";
 import { useEvent, useEventState, useGuest } from "@/lib/useEvents";
@@ -32,8 +32,7 @@ function PassInner() {
       <div className="shell">
         <BackBar title={t("pass.title")} />
         <div className="pad col gap12">
-          <p className="muted">{t("pass.connect")}</p>
-          <WalletButton />
+          <ConnectOnHome />
         </div>
       </div>
     );
