@@ -91,7 +91,10 @@ contract KlubDexAdapter is IKlubBuyAdapter {
         uint256 fee = launchpad.createFee();
         if (msg.value <= fee) revert ValueBelowCreateFee(msg.value, fee);
 
-        token = launchpad.createToken{value: fee}(name, symbol, metadataCID, "", "", "", "");
+        TokenInfo memory info = _tokenInfo(metadataCID);
+        token = launchpad.createToken{value: fee}(
+            name, symbol, info.logo, info.description, info.link1, info.link2, info.link3
+        );
         if (token == address(0)) revert TokenNotDelivered();
 
         amountOut = _buyOnCurve(token, msg.value - fee, minTokensOut, recipient);
@@ -134,6 +137,48 @@ contract KlubDexAdapter is IKlubBuyAdapter {
         );
         amountOut = IERC20(token).balanceOf(recipient) - before;
         if (amountOut < minTokensOut) revert SlippageTooHigh(amountOut, minTokensOut);
+    }
+
+    struct TokenInfo {
+        string logo;
+        string description;
+        string link1;
+        string link2;
+        string link3;
+    }
+
+    bytes5 private constant INFO_PREFIX = "klub:";
+
+    /// @dev The factory hands over one string. Plain text is the logo link, as
+    /// before. "klub:" followed by hex is abi.encode(logo, description, link1,
+    /// link2, link3), which fills the launchpad's About section too.
+    function _tokenInfo(string calldata value) private pure returns (TokenInfo memory info) {
+        bytes calldata raw = bytes(value);
+        if (raw.length < 5 || bytes5(raw[:5]) != INFO_PREFIX) {
+            info.logo = value;
+            return info;
+        }
+        bytes memory packed = _fromHex(raw[5:]);
+        (info.logo, info.description, info.link1, info.link2, info.link3) =
+            abi.decode(packed, (string, string, string, string, string));
+    }
+
+    error BadHex();
+
+    function _fromHex(bytes calldata hexChars) private pure returns (bytes memory out) {
+        if (hexChars.length % 2 != 0) revert BadHex();
+        out = new bytes(hexChars.length / 2);
+        for (uint256 i; i < out.length; ++i) {
+            out[i] = bytes1((_nibble(hexChars[2 * i]) << 4) | _nibble(hexChars[2 * i + 1]));
+        }
+    }
+
+    function _nibble(bytes1 c) private pure returns (uint8) {
+        uint8 b = uint8(c);
+        if (b >= 48 && b <= 57) return b - 48; // 0-9
+        if (b >= 97 && b <= 102) return b - 87; // a-f
+        if (b >= 65 && b <= 70) return b - 55; // A-F
+        revert BadHex();
     }
 
     /// @dev The launchpad sends bought tokens to msg.sender, so this contract
