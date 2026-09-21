@@ -8,6 +8,7 @@ import ms from "./locales/ms";
 import vi from "./locales/vi";
 import id from "./locales/id";
 import fil from "./locales/fil";
+import { extra, ExtraKey } from "./locales/extra";
 
 export const LANGS = [
   { code: "th", label: "ไทย", locale: "th-TH" },
@@ -21,7 +22,20 @@ export const LANGS = [
 
 export type Lang = (typeof LANGS)[number]["code"];
 
-const DICTS: Record<Lang, Dict> = { en, th, zh, ms, vi, id, fil };
+type FullDict = Dict & Record<ExtraKey, string>;
+const merge = (base: Dict, lang: keyof typeof extra): FullDict => ({ ...base, ...extra[lang] });
+const DICTS: Record<Lang, FullDict> = {
+  en: merge(en, "en"),
+  th: merge(th, "th"),
+  zh: merge(zh, "zh"),
+  ms: merge(ms, "ms"),
+  vi: merge(vi, "vi"),
+  id: merge(id, "id"),
+  fil: merge(fil, "fil")
+};
+const EN = DICTS.en;
+
+export type AnyKey = TKey | ExtraKey;
 const STORAGE_KEY = "klub.lang";
 
 function detect(): Lang {
@@ -43,7 +57,7 @@ type I18n = {
   lang: Lang;
   locale: string;
   setLang: (lang: Lang) => void;
-  t: (key: TKey, vars?: Vars) => string;
+  t: (key: AnyKey, vars?: Vars) => string;
 };
 
 const Ctx = createContext<I18n | null>(null);
@@ -71,8 +85,8 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   const value = useMemo<I18n>(() => {
     const dict = DICTS[lang];
     const locale = LANGS.find((l) => l.code === lang)?.locale ?? "en-US";
-    const t = (key: TKey, vars?: Vars) => {
-      let text = dict[key] ?? en[key] ?? key;
+    const t = (key: AnyKey, vars?: Vars) => {
+      let text = dict[key] ?? EN[key] ?? key;
       if (vars) for (const [k, v] of Object.entries(vars)) text = text.split(`{${k}}`).join(String(v));
       return text;
     };
