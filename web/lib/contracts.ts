@@ -8,8 +8,20 @@ export const contracts = {
   vault: addr(process.env.NEXT_PUBLIC_VAULT),
   quests: addr(process.env.NEXT_PUBLIC_QUESTS),
   profiles: addr(process.env.NEXT_PUBLIC_PROFILES),
-  adapter: addr(process.env.NEXT_PUBLIC_ADAPTER)
+  adapter: addr(process.env.NEXT_PUBLIC_ADAPTER),
+  secrets: addr(process.env.NEXT_PUBLIC_SECRETS)
 };
+
+export const secretsAbi = parseAbi([
+  "function encryptionKey(address account) view returns (bytes32)",
+  "function encryptionKeysOf(address[] accounts) view returns (bytes32[])",
+  "function sealedKeyOf(uint256 eventId, address guest) view returns (bytes)",
+  "function setEncryptionKey(bytes32 key)",
+  "function shareKeys(uint256 eventId, address[] guests, bytes[] sealedKeys)",
+  "error NotOrganizer()",
+  "error LengthMismatch()",
+  "error EmptyKey()"
+]);
 
 export const factoryAbi = parseAbi([
   "struct RefundPolicy { uint8 remainder; uint8 cancelBefore; uint8 cancelAfter; uint8 rejected; uint8 noShow; uint64 refundCutoff; }",
@@ -106,7 +118,10 @@ export const vaultAbi = parseAbi([
   "function finalize(uint256 eventId)",
   "function claim(uint256 eventId)",
   "function claimQuest(uint256 eventId, uint256 questId)",
-  "function withdrawLeftover(uint256 eventId)"
+  "function withdrawLeftover(uint256 eventId)",
+  "error NotOrganizer()",
+  "error TooEarly()",
+  "error NothingToWithdraw()"
 ]);
 
 export const questsAbi = parseAbi([

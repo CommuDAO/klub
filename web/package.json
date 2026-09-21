@@ -8,6 +8,8 @@
     "start": "next start"
   },
   "dependencies": {
+    "@noble/curves": "1.9.1",
+    "@noble/hashes": "1.8.0",
     "@tanstack/react-query": "^5.59.0",
     "next": "14.2.15",
     "qrcode": "^1.5.4",

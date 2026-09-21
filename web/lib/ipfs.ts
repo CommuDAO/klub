@@ -1,5 +1,15 @@
+import type { SecretBox } from "./secrets";
+
+export const CATEGORIES = ["meetup", "workshop", "party", "sports", "conference", "community", "other"] as const;
+export type Category = (typeof CATEGORIES)[number];
+
+/// Venue fields that move into the encrypted box when the organizer hides the location.
+export type PrivateLocation = { venue?: string; mapUrl?: string; lat?: number; lng?: number };
+
 export type EventMetadata = {
   title?: string;
+  category?: Category;
+  private?: SecretBox;
   description?: string;
   coverCID?: string;
   venue?: string;
