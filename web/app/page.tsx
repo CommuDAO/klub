@@ -19,7 +19,7 @@ export default function HomePage() {
 
   return (
     <div className="shell">
-      <Header />
+      <Header home />
       <main className="pad col gap16">
         {mine.length > 0 ? (
           <section className="col gap8">

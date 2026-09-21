@@ -3,12 +3,13 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useAccount, useReadContract, useWriteContract } from "wagmi";
-import { BackBar, WalletButton } from "@/components/Chrome";
-import { contracts, erc20Abi, profilesAbi, registryAbi } from "@/lib/contracts";
+import { useAccount, usePublicClient, useReadContract, useSignMessage, useWriteContract } from "wagmi";
+import { BackBar, ConnectOnHome } from "@/components/Chrome";
+import { contracts, erc20Abi, profilesAbi, registryAbi, secretsAbi } from "@/lib/contracts";
 import { explainError } from "@/lib/errors";
 import { useEvent, useEventState, useGuest, usePools } from "@/lib/useEvents";
-import { EventMetadata, ipfsUrl, loadMetadata } from "@/lib/ipfs";
+import { EventMetadata, ipfsUrl, loadMetadata, PrivateLocation } from "@/lib/ipfs";
+import { decryptJSON, eventKeyMessage, GUEST_KEY_MESSAGE, guestKeys, keyFromSignature, openKey, ZERO_KEY } from "@/lib/secrets";
 import { amount, dateRange, shortAddress } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import type { TKey } from "@/lib/locales/en";
@@ -24,7 +25,11 @@ function EventInner() {
   const { data: pools } = usePools(eventId || undefined);
   const [meta, setMeta] = useState<EventMetadata>({});
   const { writeContractAsync, isPending } = useWriteContract();
+  const { signMessageAsync } = useSignMessage();
+  const publicClient = usePublicClient();
   const [error, setError] = useState<string>();
+  const [info, setInfo] = useState<string>();
+  const [revealed, setRevealed] = useState<PrivateLocation>();
 
   useEffect(() => {
     if (event?.metadataCID) loadMetadata(event.metadataCID).then(setMeta);
@@ -46,6 +51,24 @@ function EventInner() {
     query: { enabled: Boolean(event) }
   });
 
+  const isPrivate = Boolean(meta.private);
+
+  const { data: myKey, refetch: refetchMyKey } = useReadContract({
+    address: contracts.secrets,
+    abi: secretsAbi,
+    functionName: "encryptionKey",
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address && isPrivate) }
+  });
+
+  const { data: sealed } = useReadContract({
+    address: contracts.secrets,
+    abi: secretsAbi,
+    functionName: "sealedKeyOf",
+    args: address && eventId ? [BigInt(eventId), address] : undefined,
+    query: { enabled: Boolean(address && isPrivate && eventId) }
+  });
+
   if (!eventId) return <p className="pad muted">{t("common.noEvent")}</p>;
   if (!event) return <p className="pad muted">{t("common.loadingEvent")}</p>;
   const ev = event;
@@ -57,6 +80,21 @@ function EventInner() {
   async function rsvp() {
     setError(undefined);
     try {
+      // Private events need the guest's public key on chain before approval,
+      // so the organizer can seal the location to it.
+      if (isPrivate && (!myKey || myKey === ZERO_KEY)) {
+        setInfo(t("event.keySetup"));
+        const { pub } = guestKeys(await signMessageAsync({ message: GUEST_KEY_MESSAGE }));
+        const keyHash = await writeContractAsync({
+          address: contracts.secrets,
+          abi: secretsAbi,
+          functionName: "setEncryptionKey",
+          args: [pub]
+        });
+        if (publicClient) await publicClient.waitForTransactionReceipt({ hash: keyHash });
+        await refetchMyKey();
+        setInfo(undefined);
+      }
       if (needsApproval && ev.minHolding > 0n) {
         await writeContractAsync({
           address: ev.token,
@@ -93,6 +131,31 @@ function EventInner() {
     }
   }
 
+  async function reveal() {
+    const box = meta.private;
+    if (!box) return;
+    setError(undefined);
+    setInfo(t("event.signUnlock"));
+    try {
+      let key: Uint8Array;
+      if (isOrganizer) {
+        key = keyFromSignature(await signMessageAsync({ message: eventKeyMessage(box.salt) }));
+      } else {
+        const { priv } = guestKeys(await signMessageAsync({ message: GUEST_KEY_MESSAGE }));
+        key = await openKey(sealed as `0x${string}`, priv);
+      }
+      setRevealed(await decryptJSON<PrivateLocation>(key, box));
+    } catch (e) {
+      setError((e as Error)?.name === "OperationError" ? t("event.unlockFailed") : explainError(e, t));
+    } finally {
+      setInfo(undefined);
+    }
+  }
+
+  const hasSealed = Boolean(sealed && sealed !== "0x");
+  const canReveal = isPrivate && !revealed && (isOrganizer || (status === 2 && hasSealed));
+  const location: PrivateLocation = isPrivate ? revealed ?? {} : meta;
+
   const policy: [TKey, number][] = [
     ["policy.remainder", event.policy.remainder],
     ["policy.cancelBefore", event.policy.cancelBefore],
@@ -125,7 +188,7 @@ function EventInner() {
                 {t("event.manage")}
               </Link>
             ) : null}
-            {!address ? <WalletButton /> : null}
+            {!address ? <ConnectOnHome /> : null}
             {address && status === 0 ? (
               <button className="btn accent wide" disabled={isPending} onClick={rsvp}>
                 {isPending ? t("common.confirmWallet") : t("event.rsvp", { amount: amount(event.minHolding) })}
@@ -161,6 +224,7 @@ function EventInner() {
                 </div>
               </div>
             ) : null}
+            {info ? <div className="card small">{info}</div> : null}
             {error ? <div className="notice">{error}</div> : null}
           </div>
 
@@ -178,9 +242,8 @@ function EventInner() {
             <div className="card col">
               <span className="tiny muted">{t("event.pool")}</span>
               <strong className="display" style={{ fontSize: 22 }}>
-                {amount(pools?.checkIn.native)} KUB
+                {t("event.poolAmount", { amount: amount(pools?.checkIn.token) })}
               </strong>
-              <span className="tiny muted">{t("event.poolTokens", { amount: amount(pools?.checkIn.token) })}</span>
               <span className="tiny muted">{t("event.poolHint")}</span>
             </div>
             <div className="card col">
@@ -192,19 +255,33 @@ function EventInner() {
             </div>
           </div>
 
-          {meta.venue || meta.mapUrl ? (
+          {isPrivate && !revealed ? (
             <div className="col gap8">
               <strong>{t("event.location")}</strong>
-              {meta.venue ? <span className="small muted">{meta.venue}</span> : null}
-              {process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY && meta.lat && meta.lng ? (
+              <span className="small muted">
+                {status === 2 && !hasSealed && !isOrganizer ? t("event.notSharedYet") : t("event.locationPrivate")}
+              </span>
+              {canReveal ? (
+                <button className="btn ghost wide" onClick={reveal}>
+                  {t("event.showLocation")}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {location.venue || location.mapUrl ? (
+            <div className="col gap8">
+              <strong>{t("event.location")}</strong>
+              {location.venue ? <span className="small muted">{location.venue}</span> : null}
+              {process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY && location.lat && location.lng ? (
                 <iframe
                   title="map"
                   style={{ border: 0, width: "100%", height: 160, borderRadius: 14 }}
-                  src={`https://www.google.com/maps/embed/v1/place?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY}&q=${meta.lat},${meta.lng}`}
+                  src={`https://www.google.com/maps/embed/v1/place?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY}&q=${location.lat},${location.lng}`}
                 />
               ) : null}
-              {meta.mapUrl ? (
-                <a className="btn ghost wide" href={meta.mapUrl} target="_blank" rel="noreferrer">
+              {location.mapUrl ? (
+                <a className="btn ghost wide" href={location.mapUrl} target="_blank" rel="noreferrer">
                   {t("event.openMaps")}
                 </a>
               ) : null}
