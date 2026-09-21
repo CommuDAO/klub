@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { encodeAbiParameters, parseAbiParameters, parseEther, parseEventLogs, parseUnits } from "viem";
-import { useAccount, usePublicClient, useReadContract, useWriteContract } from "wagmi";
+import { useAccount, usePublicClient, useReadContract, useSignMessage, useWriteContract } from "wagmi";
 import { BackBar } from "@/components/Chrome";
 import { Notice, NoticeTone } from "@/components/Notice";
 import { contracts, factoryAbi, profilesAbi, DESTINATION, METHOD } from "@/lib/contracts";
 import { explainError } from "@/lib/errors";
-import { coordsFromMapUrl, EventMetadata, ipfsUrl } from "@/lib/ipfs";
+import { CATEGORIES, Category, coordsFromMapUrl, EventMetadata, ipfsUrl, PrivateLocation } from "@/lib/ipfs";
+import { encryptJSON, eventKeyMessage, keyFromSignature, newSalt, SecretBox } from "@/lib/secrets";
 import { pinataReady, uploadCover } from "@/lib/pinata";
 import { useI18n } from "@/lib/i18n";
 import type { TKey } from "@/lib/locales/en";
@@ -29,6 +30,7 @@ export default function CreatePage() {
   const { address } = useAccount();
   const publicClient = usePublicClient();
   const { writeContractAsync, isPending } = useWriteContract();
+  const { signMessageAsync } = useSignMessage();
   const { data: profile } = useReadContract({
     address: contracts.profiles,
     abi: profilesAbi,
@@ -46,6 +48,8 @@ export default function CreatePage() {
     name: "",
     symbol: "",
     organizerName: "",
+    category: "" as Category | "",
+    hideLocation: false,
     token: "",
     description: "",
     venue: "",
@@ -92,6 +96,7 @@ export default function CreatePage() {
     if (!address) return t("v.connect");
     if (!form.name.trim()) return t("v.name");
     if (!form.symbol.trim()) return t("v.symbol");
+    if (!form.category) return t("v.category");
     if (!form.start || !form.end) return t("v.times");
     const start = new Date(form.start).getTime();
     const end = new Date(form.end).getTime();
@@ -119,17 +124,20 @@ export default function CreatePage() {
     }
   }
 
-  function buildMetadata(): string {
+  function locationFields(): PrivateLocation {
     const { lat, lng } = coordsFromMapUrl(form.mapUrl);
+    return { venue: form.venue || undefined, mapUrl: form.mapUrl || undefined, lat, lng };
+  }
+
+  /// With a hidden location the venue fields only exist inside the encrypted box.
+  function buildMetadata(privateBox?: SecretBox): string {
     const meta: EventMetadata = {
       title: form.name,
+      category: form.category || undefined,
       description: form.description || undefined,
       coverCID: coverCID || undefined,
-      venue: form.venue || undefined,
-      mapUrl: form.mapUrl || undefined,
-      lat,
-      lng,
-      telegram: form.telegram || undefined
+      telegram: form.telegram || undefined,
+      ...(privateBox ? { private: privateBox } : locationFields())
     };
     return JSON.stringify(meta);
   }
@@ -150,6 +158,16 @@ export default function CreatePage() {
     const total = 2 + (needsName ? 1 : 0);
 
     try {
+      // Lock the location first: the key comes from a signature over a random
+      // salt, so the organizer can re-derive it later on any device.
+      let privateBox: SecretBox | undefined;
+      if (form.hideLocation) {
+        setNotice({ tone: "info", text: t("create.signLock") });
+        const salt = newSalt();
+        const signature = await signMessageAsync({ message: eventKeyMessage(salt) });
+        privateBox = await encryptJSON(keyFromSignature(signature), locationFields(), salt);
+      }
+
       // The launchpad shows logo, description and three links. link1 is the
       // event page, link2 (X) stays empty, link3 is Telegram, which is the
       // same order other tokens on the launchpad use.
@@ -181,7 +199,7 @@ export default function CreatePage() {
             rewardMode: Number(form.rewardMode),
             minCreditMinutes: Number(form.minCredit),
             methods: Number(form.methods),
-            requireApproval: form.requireApproval,
+            requireApproval: form.requireApproval || form.hideLocation,
             capacity: Number(form.capacity),
             minHolding: parseUnits(form.minHolding || "0", 18),
             burnAmount: parseUnits(form.burnAmount || "0", 18),
@@ -210,7 +228,7 @@ export default function CreatePage() {
         address: contracts.factory,
         abi: factoryAbi,
         functionName: "setMetadata",
-        args: [eventId, buildMetadata()]
+        args: [eventId, buildMetadata(privateBox)]
       });
       await publicClient.waitForTransactionReceipt({ hash: metaHash });
 
@@ -258,6 +276,20 @@ export default function CreatePage() {
           <label className="col gap8">
             <span className="label">{t("create.eventName")}</span>
             <input className="field" value={form.name} onChange={(e) => set("name", e.target.value)} />
+          </label>
+
+          <label className="col gap8">
+            <span className="label">{t("cat.label")} *</span>
+            <select className="field" value={form.category} onChange={(e) => set("category", e.target.value)}>
+              <option value="" disabled>
+                {t("cat.pick")}
+              </option>
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {t(`cat.${c}`)}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="col gap8">
@@ -335,6 +367,14 @@ export default function CreatePage() {
           </label>
 
           <label className="col gap8">
+            <span className="between">
+              <span className="small">{t("create.hideLocation")}</span>
+              <input type="checkbox" checked={form.hideLocation} onChange={(e) => set("hideLocation", e.target.checked)} />
+            </span>
+            <span className="tiny muted">{t("create.hideLocationHint")}</span>
+          </label>
+
+          <label className="col gap8">
             <span className="label">{t("create.starts")}</span>
             <input className="field" type="datetime-local" value={form.start} onChange={(e) => set("start", e.target.value)} />
           </label>
@@ -361,7 +401,12 @@ export default function CreatePage() {
           </label>
           <label className="between">
             <span className="small">{t("create.requireApproval")}</span>
-            <input type="checkbox" checked={form.requireApproval} onChange={(e) => set("requireApproval", e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={form.requireApproval || form.hideLocation}
+              disabled={form.hideLocation}
+              onChange={(e) => set("requireApproval", e.target.checked)}
+            />
           </label>
           <div className="row gap8" style={{ flexWrap: "wrap" }}>
             {methods.map(([label, bit]) => (
