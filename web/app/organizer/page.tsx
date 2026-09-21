@@ -8,8 +8,10 @@ import { EventRow } from "@/components/EventRow";
 import { contracts, factoryAbi, profilesAbi } from "@/lib/contracts";
 import { useEventList } from "@/lib/useEvents";
 import { shortAddress } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 
 function OrganizerInner() {
+  const { t } = useI18n();
   const params = useSearchParams();
   const organizer = (params.get("address") ?? "") as `0x${string}`;
   const { address } = useAccount();
@@ -63,35 +65,39 @@ function OrganizerInner() {
 
   return (
     <div className="shell">
-      <BackBar title="Organizer" href="/discover" />
+      <BackBar title={t("org.title")} href="/discover" />
       <main className="pad col gap16">
         <div className="col gap8">
           <h1 className="display h1">{profile?.name || shortAddress(organizer)}</h1>
-          <span className="small muted">{Number(followers ?? 0)} followers · {theirs.length} events</span>
+          <span className="small muted">{t("org.stats", { followers: Number(followers ?? 0), events: theirs.length })}</span>
           <div className="row gap8">
             <button className="btn" disabled={isPending || !address} onClick={toggleFollow}>
-              {following ? "Unfollow" : "Follow"}
+              {following ? t("org.unfollow") : t("org.follow")}
             </button>
             {profile?.telegram ? (
               <a className="btn ghost" href={profile.telegram} target="_blank" rel="noreferrer">
-                Telegram
+                {t("common.telegram")}
               </a>
             ) : null}
           </div>
         </div>
 
         <section className="col gap8">
-          <strong>Upcoming</strong>
-          {theirs.filter((e) => e.endTime > now).map((e) => (
-            <EventRow key={e.id} event={e} />
-          ))}
+          <strong>{t("org.upcoming")}</strong>
+          {theirs
+            .filter((e) => e.endTime > now)
+            .map((e) => (
+              <EventRow key={e.id} event={e} />
+            ))}
         </section>
 
         <section className="col gap8">
-          <strong>Past</strong>
-          {theirs.filter((e) => e.endTime <= now).map((e) => (
-            <EventRow key={e.id} event={e} badge="Ended" />
-          ))}
+          <strong>{t("org.past")}</strong>
+          {theirs
+            .filter((e) => e.endTime <= now)
+            .map((e) => (
+              <EventRow key={e.id} event={e} badge={t("row.ended")} />
+            ))}
         </section>
       </main>
     </div>
@@ -100,7 +106,7 @@ function OrganizerInner() {
 
 export default function OrganizerPage() {
   return (
-    <Suspense fallback={<p className="pad muted">Loading…</p>}>
+    <Suspense fallback={null}>
       <OrganizerInner />
     </Suspense>
   );

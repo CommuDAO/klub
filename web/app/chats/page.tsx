@@ -6,8 +6,10 @@ import { BottomNav, Header } from "@/components/Chrome";
 import { useEventList } from "@/lib/useEvents";
 import { EventMetadata, loadMetadata } from "@/lib/ipfs";
 import { dateRange } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 
 export default function ChatsPage() {
+  const { t, locale } = useI18n();
   const { address } = useAccount();
   const { events } = useEventList();
   const [metas, setMetas] = useState<Record<number, EventMetadata>>({});
@@ -20,26 +22,24 @@ export default function ChatsPage() {
 
   return (
     <div className="shell">
-      <Header title="Chats" />
+      <Header title={t("chats.title")} />
       <main className="pad col gap12">
-        <p className="muted small">
-          KLUB has no in-app chat. Each event links to the group its organizer already runs.
-        </p>
-        {!address ? <p className="muted small">Connect your wallet to see the events you joined.</p> : null}
+        <p className="muted small">{t("chats.intro")}</p>
+        {!address ? <p className="muted small">{t("chats.connect")}</p> : null}
         {events.map((e) => {
           const meta = metas[e.id] ?? {};
           return (
             <div key={e.id} className="between divider" style={{ padding: "12px 0" }}>
               <div className="col">
-                <strong>{meta.title ?? `Event #${e.id}`}</strong>
-                <span className="small muted">{dateRange(e.startTime, e.endTime)}</span>
+                <strong>{meta.title ?? t("common.event", { id: e.id })}</strong>
+                <span className="small muted">{dateRange(e.startTime, e.endTime, locale)}</span>
               </div>
               {meta.telegram ? (
                 <a className="btn" style={{ height: 40 }} href={meta.telegram} target="_blank" rel="noreferrer">
-                  Telegram
+                  {t("common.telegram")}
                 </a>
               ) : (
-                <span className="chip">No group</span>
+                <span className="chip">{t("chats.noGroup")}</span>
               )}
             </div>
           );

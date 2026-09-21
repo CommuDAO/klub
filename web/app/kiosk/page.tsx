@@ -8,11 +8,13 @@ import { encodeAbiParameters, keccak256, parseAbiParameters } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { contracts, registryAbi } from "@/lib/contracts";
 import { kubChain } from "@/lib/chain";
+import { LanguageSelect, useI18n } from "@/lib/i18n";
 
 const STORAGE_KEY = "klub.kiosk.key";
 const WINDOW_SECONDS = 30;
 
 function KioskInner() {
+  const { t } = useI18n();
   const params = useSearchParams();
   const eventId = Number(params.get("id") ?? 0);
   const [privateKey, setPrivateKey] = useState<`0x${string}`>();
@@ -29,8 +31,8 @@ function KioskInner() {
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const account = useMemo(() => (privateKey ? privateKeyToAccount(privateKey) : undefined), [privateKey]);
@@ -78,34 +80,41 @@ function KioskInner() {
     <div className="dark" style={{ minHeight: "100dvh", padding: 32 }}>
       <div style={{ display: "flex", gap: 48, alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
         <div className="col gap16" style={{ maxWidth: 420 }}>
-          <span className="display" style={{ fontSize: 24 }}>KLUB</span>
-          <h1 className="display" style={{ fontSize: 44, margin: 0 }}>Event #{eventId}</h1>
+          <div className="between">
+            <span className="display" style={{ fontSize: 24 }}>
+              KLUB
+            </span>
+            <LanguageSelect compact />
+          </div>
+          <h1 className="display" style={{ fontSize: 44, margin: 0 }}>
+            {t("common.event", { id: eventId })}
+          </h1>
           <div className="row gap8">
             <button className={inbound ? "btn accent" : "btn ghost"} onClick={() => setInbound(true)}>
-              Check in
+              {t("kiosk.checkIn")}
             </button>
             <button className={!inbound ? "btn accent" : "btn ghost"} onClick={() => setInbound(false)}>
-              Check out
+              {t("kiosk.checkOut")}
             </button>
           </div>
           <ol className="muted" style={{ lineHeight: 1.8, paddingLeft: 18 }}>
-            <li>Open KLUB in your wallet browser</li>
-            <li>Tap Scan venue QR</li>
-            <li>Confirm — the burn happens in that transaction</li>
+            <li>{t("kiosk.step1")}</li>
+            <li>{t("kiosk.step2")}</li>
+            <li>{t("kiosk.step3")}</li>
           </ol>
           <div className="row gap8">
             <button className="btn ghost" disabled={isPending} onClick={register}>
-              Register this screen
+              {t("kiosk.register")}
             </button>
             <button className="btn ghost" disabled={isPending} onClick={revoke}>
-              Revoke
+              {t("kiosk.revoke")}
             </button>
           </div>
-          <span className="tiny muted">Kiosk key {account?.address}</span>
+          <span className="tiny muted">{t("kiosk.key", { address: account?.address ?? "" })}</span>
         </div>
         <div className="col gap12" style={{ alignItems: "center" }}>
-          {qr ? <img src={qr} alt="Rotating check-in QR" style={{ width: 420, borderRadius: 24, background: "#fff", padding: 16 }} /> : null}
-          <span className="muted">New code in {secondsLeft}s</span>
+          {qr ? <img src={qr} alt="QR" style={{ width: 420, maxWidth: "100%", borderRadius: 24, background: "#fff", padding: 16 }} /> : null}
+          <span className="muted">{t("kiosk.newCode", { seconds: secondsLeft })}</span>
         </div>
       </div>
     </div>
@@ -114,7 +123,7 @@ function KioskInner() {
 
 export default function KioskPage() {
   return (
-    <Suspense fallback={<p className="pad muted">Loading…</p>}>
+    <Suspense fallback={null}>
       <KioskInner />
     </Suspense>
   );
