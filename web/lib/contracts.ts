@@ -24,7 +24,24 @@ export const factoryAbi = parseAbi([
   "function tokenOf(uint256 eventId) view returns (address)",
   "function createEvent(CreateEventParams p) payable returns (uint256 eventId)",
   "function setMinCredit(uint256 eventId, uint32 minCreditMinutes)",
-  "function setMetadata(uint256 eventId, string metadataCID)"
+  "function setMetadata(uint256 eventId, string metadataCID)",
+  "function organizerOf(uint256 eventId) view returns (address)",
+  "event EventCreated(uint256 indexed eventId, address indexed organizer, address indexed token, bool tokenCreated, uint64 startTime, uint64 endTime, string metadataCID)",
+  "error NotAdmin()",
+  "error NotOrganizer()",
+  "error UnknownEvent()",
+  "error InitialBuyTooSmall(uint256 sent, uint256 required)",
+  "error BadTimes()",
+  "error BadMethods()",
+  "error BadAmounts()",
+  "error BadMinCredit()",
+  "error BadCutoff()",
+  "error TokenNotDelivered()",
+  "error CheckInStarted()",
+  "error ValueBelowCreateFee(uint256 sent, uint256 createFee)",
+  "error SlippageTooHigh(uint256 amountOut, uint256 minTokensOut)",
+  "error RouteRequired()",
+  "error RouteNotAllowedOnCurve()"
 ]);
 
 export const registryAbi = parseAbi([
@@ -56,7 +73,26 @@ export const registryAbi = parseAbi([
   "function checkOutWithKiosk(uint256 eventId, uint64 windowId, bytes signature)",
   "function checkInWithCode(uint256 eventId, bytes signature)",
   "function settle(uint256 eventId)",
-  "function KIOSK_WINDOW() view returns (uint64)"
+  "function KIOSK_WINDOW() view returns (uint64)",
+  "error NotOrganizer()",
+  "error NotStaff()",
+  "error AlreadyRsvped()",
+  "error NoRsvp()",
+  "error NotApproved()",
+  "error EventFull()",
+  "error TooLate()",
+  "error TooEarly()",
+  "error OutsideEventWindow()",
+  "error AlreadyCheckedIn()",
+  "error NotCheckedIn()",
+  "error AlreadyCheckedOut()",
+  "error MethodDisabled()",
+  "error BadWindow()",
+  "error BadSigner()",
+  "error AlreadySettled()",
+  "error NotSettled()",
+  "error NothingToWithdraw()",
+  "error CodeClosed()"
 ]);
 
 export const vaultAbi = parseAbi([
