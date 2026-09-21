@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { parseEther, parseUnits } from "viem";
-import { useReadContract, useWriteContract } from "wagmi";
+import { useRouter } from "next/navigation";
+import { parseEther, parseEventLogs, parseUnits } from "viem";
+import { useAccount, usePublicClient, useReadContract, useWriteContract } from "wagmi";
 import { BackBar } from "@/components/Chrome";
-import { contracts, factoryAbi, DESTINATION, METHOD } from "@/lib/contracts";
+import { Notice, NoticeTone } from "@/components/Notice";
+import { contracts, factoryAbi, profilesAbi, DESTINATION, METHOD } from "@/lib/contracts";
+import { explainError } from "@/lib/errors";
 import { coordsFromMapUrl, EventMetadata, ipfsUrl } from "@/lib/ipfs";
 import { pinataReady, uploadCover } from "@/lib/pinata";
 
@@ -19,7 +22,17 @@ const toLocalInput = (d: Date) => {
 const MIN_LEAD_MINUTES = 5;
 
 export default function CreatePage() {
+  const router = useRouter();
+  const { address } = useAccount();
+  const publicClient = usePublicClient();
   const { writeContractAsync, isPending } = useWriteContract();
+  const { data: profile } = useReadContract({
+    address: contracts.profiles,
+    abi: profilesAbi,
+    functionName: "profileOf",
+    args: address ? [address] : undefined,
+    query: { enabled: Boolean(address) }
+  });
   const { data: minInitialBuy } = useReadContract({
     address: contracts.factory,
     abi: factoryAbi,
@@ -29,6 +42,7 @@ export default function CreatePage() {
   const [form, setForm] = useState({
     name: "",
     symbol: "",
+    organizerName: "",
     token: "",
     description: "",
     venue: "",
@@ -52,10 +66,18 @@ export default function CreatePage() {
     initialBuy: "0.2"
   });
   const [coverCID, setCoverCID] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [status, setStatus] = useState<string>();
+  const [tokenImageCID, setTokenImageCID] = useState("");
+  const [uploading, setUploading] = useState<"" | "cover" | "token">("");
+  const [notice, setNotice] = useState<{ tone: NoticeTone; text: string; link?: string } | undefined>();
+  const [working, setWorking] = useState(false);
+
+  const setStatus = (text?: string, tone: NoticeTone = "error") => setNotice(text ? { tone, text } : undefined);
 
   const set = (key: keyof typeof form, value: unknown) => setForm((f) => ({ ...f, [key]: value }));
+
+  useEffect(() => {
+    if (profile?.name) setForm((f) => ({ ...f, organizerName: f.organizerName || profile.name }));
+  }, [profile?.name]);
 
   useEffect(() => {
     const start = new Date(Date.now() + 30 * 60 * 1000);
@@ -66,6 +88,7 @@ export default function CreatePage() {
   /// Same rules the factory enforces, checked before the wallet opens so a
   /// bad form never becomes a failed transaction.
   function validate(): string | undefined {
+    if (!address) return "Connect your wallet first.";
     if (!form.name.trim()) return "Give the event a name.";
     if (!form.symbol.trim()) return "Give the token a symbol.";
     if (!form.start || !form.end) return "Set when the event starts and ends.";
@@ -88,16 +111,18 @@ export default function CreatePage() {
     return undefined;
   }
 
-  async function onCoverPicked(file?: File) {
+  async function onImagePicked(kind: "cover" | "token", file?: File) {
     if (!file) return;
     setStatus(undefined);
-    setUploading(true);
+    setUploading(kind);
     try {
-      setCoverCID(await uploadCover(file));
+      const cid = await uploadCover(file);
+      if (kind === "cover") setCoverCID(cid);
+      else setTokenImageCID(cid);
     } catch (e) {
       setStatus((e as Error).message);
     } finally {
-      setUploading(false);
+      setUploading("");
     }
   }
 
@@ -123,7 +148,19 @@ export default function CreatePage() {
       setStatus(problem);
       return;
     }
+    if (!publicClient) return;
+    setWorking(true);
+
+    // The launchpad keeps whatever we pass as the token logo, so the first
+    // transaction carries only the image link. The full event details are
+    // written to KLUB right after with setMetadata.
+    const logoCID = tokenImageCID || coverCID;
+    const logo = logoCID ? ipfsUrl(logoCID) : "";
+    const needsName = Boolean(form.organizerName.trim()) && form.organizerName.trim() !== (profile?.name ?? "");
+    const steps = 2 + (needsName ? 1 : 0);
+
     try {
+      setNotice({ tone: "info", text: `Step 1 of ${steps}: creating the event and its token. Confirm in your wallet.` });
       const hash = await writeContractAsync({
         address: contracts.factory,
         abi: factoryAbi,
@@ -134,7 +171,7 @@ export default function CreatePage() {
             token: (form.token || "0x0000000000000000000000000000000000000000") as `0x${string}`,
             name: form.name,
             symbol: form.symbol,
-            metadataCID: buildMetadata(),
+            metadataCID: logo,
             startTime: toUnix(form.start),
             endTime: toUnix(form.end),
             rewardMode: Number(form.rewardMode),
@@ -157,9 +194,39 @@ export default function CreatePage() {
           }
         ]
       });
-      setStatus(`Sent: ${hash}`);
+      setNotice({ tone: "info", text: "Waiting for the transaction to be confirmed…" });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") throw new Error("The create transaction failed on chain.");
+      const created = parseEventLogs({ abi: factoryAbi, eventName: "EventCreated", logs: receipt.logs })[0];
+      if (!created) throw new Error("The event was created but its number could not be read.");
+      const eventId = created.args.eventId;
+
+      setNotice({ tone: "info", text: `Step 2 of ${steps}: saving the event details. Confirm in your wallet.` });
+      const metaHash = await writeContractAsync({
+        address: contracts.factory,
+        abi: factoryAbi,
+        functionName: "setMetadata",
+        args: [eventId, buildMetadata()]
+      });
+      await publicClient.waitForTransactionReceipt({ hash: metaHash });
+
+      if (needsName) {
+        setNotice({ tone: "info", text: `Step 3 of ${steps}: saving your organizer name. Confirm in your wallet.` });
+        const nameHash = await writeContractAsync({
+          address: contracts.profiles,
+          abi: profilesAbi,
+          functionName: "setProfile",
+          args: [form.organizerName.trim(), profile?.avatarCID ?? "", profile?.telegram || form.telegram || ""]
+        });
+        await publicClient.waitForTransactionReceipt({ hash: nameHash });
+      }
+
+      setNotice({ tone: "success", text: "Event created. Opening it now…" });
+      router.push(`/event?id=${eventId}`);
     } catch (e) {
-      setStatus((e as Error).message.split("\n")[0]);
+      setNotice({ tone: "error", text: explainError(e) });
+    } finally {
+      setWorking(false);
     }
   }
 
@@ -188,6 +255,11 @@ export default function CreatePage() {
             <input className="field" value={form.symbol} onChange={(e) => set("symbol", e.target.value)} placeholder="KNIGHT" />
           </label>
 
+          <label className="col gap8">
+            <span className="label">Organizer name</span>
+            <input className="field" value={form.organizerName} onChange={(e) => set("organizerName", e.target.value)} placeholder="Shown as the host on every event you run" />
+          </label>
+
           <div className="col gap8">
             <span className="label">Cover image</span>
             <span className="tiny muted">Square, 1200 × 1200 px works best. JPG or PNG, up to 5 MB.</span>
@@ -196,13 +268,29 @@ export default function CreatePage() {
               className="field"
               type="file"
               accept="image/png,image/jpeg,image/webp"
-              disabled={!pinataReady || uploading}
-              onChange={(e) => onCoverPicked(e.target.files?.[0])}
+              disabled={!pinataReady || uploading !== ""}
+              onChange={(e) => onImagePicked("cover", e.target.files?.[0])}
               style={{ paddingTop: 11 }}
             />
-            {uploading ? <span className="tiny muted">Uploading to IPFS…</span> : null}
+            {uploading === "cover" ? <span className="tiny muted">Uploading to IPFS…</span> : null}
             {!pinataReady ? <span className="tiny muted">Image upload is not configured on this deployment.</span> : null}
-            {coverCID ? <span className="tiny muted">Pinned: {coverCID}</span> : null}
+          </div>
+
+          <div className="col gap8">
+            <span className="label">Token image</span>
+            <span className="tiny muted">Shown on the launchpad. Square, 512 × 512 px. Leave empty to use the cover.</span>
+            {tokenImageCID ? (
+              <img src={ipfsUrl(tokenImageCID)} alt="Token image preview" style={{ width: 96, height: 96, borderRadius: 16, objectFit: "cover" }} />
+            ) : null}
+            <input
+              className="field"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              disabled={!pinataReady || uploading !== ""}
+              onChange={(e) => onImagePicked("token", e.target.files?.[0])}
+              style={{ paddingTop: 11 }}
+            />
+            {uploading === "token" ? <span className="tiny muted">Uploading to IPFS…</span> : null}
           </div>
 
           <label className="col gap8">
@@ -334,10 +422,10 @@ export default function CreatePage() {
             <input className="field" value={form.token} onChange={(e) => set("token", e.target.value)} placeholder="0x… — leave empty to create a new token" />
           </label>
 
-          <button className="btn accent wide" disabled={isPending || uploading} onClick={submit}>
-            {isPending ? "Confirm in wallet…" : "Create event and buy"}
+          <button className="btn accent wide" disabled={isPending || working || uploading !== ""} onClick={submit}>
+            {working ? "Working…" : "Create event and buy"}
           </button>
-          {status ? <span className="tiny muted" style={{ wordBreak: "break-all" }}>{status}</span> : null}
+          {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
         </div>
       </main>
     </div>
