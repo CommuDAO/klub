@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { parseEther, parseUnits } from "viem";
 import { useReadContract, useWriteContract } from "wagmi";
 import { BackBar } from "@/components/Chrome";
@@ -9,6 +9,14 @@ import { coordsFromMapUrl, EventMetadata, ipfsUrl } from "@/lib/ipfs";
 import { pinataReady, uploadCover } from "@/lib/pinata";
 
 const toUnix = (value: string) => BigInt(Math.floor(new Date(value).getTime() / 1000));
+
+/// datetime-local wants "YYYY-MM-DDTHH:mm" in local time.
+const toLocalInput = (d: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const MIN_LEAD_MINUTES = 5;
 
 export default function CreatePage() {
   const { writeContractAsync, isPending } = useWriteContract();
@@ -49,6 +57,37 @@ export default function CreatePage() {
 
   const set = (key: keyof typeof form, value: unknown) => setForm((f) => ({ ...f, [key]: value }));
 
+  useEffect(() => {
+    const start = new Date(Date.now() + 30 * 60 * 1000);
+    const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
+    setForm((f) => ({ ...f, start: f.start || toLocalInput(start), end: f.end || toLocalInput(end) }));
+  }, []);
+
+  /// Same rules the factory enforces, checked before the wallet opens so a
+  /// bad form never becomes a failed transaction.
+  function validate(): string | undefined {
+    if (!form.name.trim()) return "Give the event a name.";
+    if (!form.symbol.trim()) return "Give the token a symbol.";
+    if (!form.start || !form.end) return "Set when the event starts and ends.";
+    const start = new Date(form.start).getTime();
+    const end = new Date(form.end).getTime();
+    if (start < Date.now() + MIN_LEAD_MINUTES * 60 * 1000) {
+      return `Start time must be at least ${MIN_LEAD_MINUTES} minutes from now.`;
+    }
+    if (end <= start) return "End time must be after the start time.";
+    if (form.cutoff && new Date(form.cutoff).getTime() > start) {
+      return "Cancel cutoff must be on or before the start time.";
+    }
+    const holding = Number(form.minHolding || 0);
+    const burn = Number(form.burnAmount || 0);
+    if (burn > holding) return "Burn at check-in cannot be more than the amount held.";
+    if (Number(form.rewardMode) === 0 && Number(form.minCredit) <= 0) return "Minimum credit must be above 0.";
+    if (!form.token && Number(form.initialBuy || 0) <= 0.1) {
+      return "Initial buy must be more than 0.1 KUB, the launchpad keeps 0.1 KUB as the creation fee.";
+    }
+    return undefined;
+  }
+
   async function onCoverPicked(file?: File) {
     if (!file) return;
     setStatus(undefined);
@@ -79,6 +118,11 @@ export default function CreatePage() {
 
   async function submit() {
     setStatus(undefined);
+    const problem = validate();
+    if (problem) {
+      setStatus(problem);
+      return;
+    }
     try {
       const hash = await writeContractAsync({
         address: contracts.factory,
@@ -271,6 +315,7 @@ export default function CreatePage() {
           <label className="col gap8">
             <span className="label">Cancel cutoff</span>
             <input className="field" type="datetime-local" value={form.cutoff} onChange={(e) => set("cutoff", e.target.value)} />
+            <span className="tiny muted">Must be on or before the start time. Leave empty to use the start time.</span>
           </label>
         </div>
 
